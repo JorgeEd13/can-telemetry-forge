@@ -205,3 +205,49 @@ validate.
 > experience, but **no private data, numbers, or source is ever committed,
 > documented, or exposed here** — the repo is grounded solely on the fictional
 > operator + public sources. (Boundary recorded outside this repo.)
+
+---
+
+## ADR-012 — Signal model as a declarative registry of self-describing signals
+
+**Context.** F1 needs per-signal generators. The obvious approach is constants and
+correlations hard-coded inline across the generator functions. But the project's
+long-run ambition (stated with the user at F1 kickoff) is for this engine to be
+**reusable to generate other rich synthetic datasets**, possibly becoming the
+late-stage objective. Inline constants optimise for a single fixed signal set and
+make a different domain's signal set a cross-cutting rewrite.
+
+**Decision.** Make the signal set a **declarative registry** (`signals/spec.py`):
+each signal is a frozen `SignalSpec` carrying its own metadata (name, SPN, unit,
+range, capability era, **driver list**) — data, not behaviour. The deterministic
+generators and the era gate read the registry; `DATA_DICTIONARY.md` mirrors it.
+What generalises is the *shape* — a signal = `(drivers, state, seeded rng) →
+values` plus its metadata — not a table of tunable coefficients (which would only
+vary magnitudes of a fixed structure). Magnitudes stay as named constants in the
+generators, to be refined in F5 without touching the dependency structure.
+
+**Consequences.** Adding/removing a signal — or, later, describing a different
+domain — is a local edit to one spec + its generator, not a scattered change. The
+`drivers` field doubles as the dependency graph the simulator orders by. Correlation
+**signs** (not magnitudes) are asserted in tests, so refinement can't break the
+contract while the physics direction holds.
+
+---
+
+## ADR-013 — Record J1939 PGNs now, keep them inert until a frame-level encoder
+
+**Context.** Each Tier-1 SPN belongs to a J1939 Parameter Group (PGN). The MVP
+emits **engineering-unit time-series**, not raw CAN frames, so the PGN (and the
+byte/bit layout within it) is not needed to generate values. But re-researching the
+standard later to add frame-level output would be wasted effort.
+
+**Decision.** Capture each J1939 signal's **PGN in the registry now**, but leave it
+**inert** (unused in generation) — "disabled by default", per the user's call at F1.
+Byte/bit layout is deliberately *not* modelled yet; the PGN field is the seam a
+future raw-frame encoder switches on. A test asserts PGNs are recorded but the
+generator does not depend on them.
+
+**Consequences.** The standards grounding is captured at the moment it's researched,
+at near-zero cost, without adding frame-encoding complexity to the MVP. When a
+frame-level output mode is wanted (noted in DATA_DICTIONARY "Not yet in Tier 1"),
+the PGN is already there.
