@@ -17,9 +17,10 @@
 A generator of **synthetic heavy-equipment CAN Bus telemetry** for
 **predictive-maintenance** datasets. It models a *realistically composed* fleet —
 machinery mix, age curve and regional deployment — emitting correlated
-engine/sensor signals over time, injects **labeled** anomalies and sensor faults,
-derives a **multi-mode failure label**, and writes tidy tables (Parquet / CSV /
-DuckDB) ready for any downstream machine-learning or data-quality work.
+engine/sensor signals over time, injects **labeled** anomalies (obvious outliers
+today; subtle/joint outliers and sensor faults next, see the roadmap), derives a
+**multi-mode failure label**, and writes tidy tables (Parquet / CSV / DuckDB)
+ready for any downstream machine-learning or data-quality work.
 
 **The data is the product.** The model that consumes it can be deliberately
 boring — the point is a dataset that is *diverse, statistically credible, and
@@ -79,7 +80,11 @@ rationale in [`docs/DECISIONS.md`](docs/DECISIONS.md)):
   road-quality** modifiers (grounded in public data) shift signal baselines *and*
   accelerate failure hazards — the seam a future drift demo shifts.
 
-## What it generates (target)
+## What it generates
+
+The pipeline below is live through the failure label and tidy tables; the
+subtle/joint outliers and sensor faults marked `(F3)` are the next phase (obvious
+labeled outliers already ship):
 
 ```
 config (fleet, regions, climate, terrain, season, anomaly rates, resolution, seed)
@@ -88,7 +93,8 @@ config (fleet, regions, climate, terrain, season, anomaly rates, resolution, see
         │                  gated by capability era (unsupported SPN → NULL)
         └─► fleet sim      units over time at configurable resolution; thermal /
              │             wear / terrain modifiers per region
-             └─► faults     labeled outliers + sensor faults (stuck / drift / dropout)
+             └─► faults     labeled obvious outliers · subtle/joint + sensor
+                  │         faults (stuck / drift / dropout) (F3)
                   └─► label  multi-mode failure_within_h (overheat / oil / bearing)
                        └─► tidy tables → Parquet / CSV / DuckDB + data dictionary
 ```
