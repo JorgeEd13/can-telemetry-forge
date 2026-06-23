@@ -8,7 +8,7 @@ Status legend: ☐ not started · ◑ in progress · ✅ done
 
 ---
 
-## F0 — Foundations & runnable skeleton  ☐
+## F0 — Foundations & runnable skeleton  ✅
 
 **Objective.** A runnable, installable, CI-green skeleton with all conventions in
 place.

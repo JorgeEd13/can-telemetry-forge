@@ -7,7 +7,7 @@
 <p align="center"><em>Synthetic heavy-equipment telemetry, grounded in the J1939 standard — realistic predictive-maintenance data you can regenerate from a seed.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-plan--stage-orange" alt="Status: plan stage">
+  <img src="https://img.shields.io/badge/status-F0%20skeleton-orange" alt="Status: F0 skeleton">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/data-100%25%20synthetic-blueviolet" alt="100% synthetic data">
   <img src="https://img.shields.io/badge/grounded-SAE%20J1939%20%2B%20physics-teal" alt="Grounded in SAE J1939 + physics">
@@ -25,11 +25,12 @@ boring — the point is a dataset that is *diverse, statistically credible, and
 fully reproducible*, so the pipeline around it (training, monitoring, drift
 detection) has something real to work on.
 
-> ⚠️ **Honest status:** this repo is at the **planning stage**. The design,
+> ⚠️ **Honest status:** the **runnable F0 skeleton is in place** — installable
+> package, `forge` CLI, offline tests, CI on Linux + Windows. The design,
 > architecture and decisions are written ([`PLAN.md`](PLAN.md),
-> [`docs/`](docs/)); the generator itself is being built phase by phase (see
-> [`docs/ROADMAP.md`](docs/ROADMAP.md)). This README describes the target and
-> will gain a real usage section as the MVP lands.
+> [`docs/`](docs/)); the generators themselves are being built phase by phase
+> (see [`docs/ROADMAP.md`](docs/ROADMAP.md)). This README describes the target
+> and will gain a real usage section as the MVP (F2) lands.
 
 ## Why it's credible (and clean-room)
 
