@@ -15,9 +15,10 @@
 </p>
 
 A generator of **synthetic heavy-equipment CAN Bus telemetry** for
-**predictive-maintenance** datasets. It simulates a fleet of equipment emitting
-correlated engine/sensor signals over time, injects **labeled** anomalies and
-sensor faults, derives a failure label, and writes tidy tables (Parquet / CSV /
+**predictive-maintenance** datasets. It models a *realistically composed* fleet —
+machinery mix, age curve and regional deployment — emitting correlated
+engine/sensor signals over time, injects **labeled** anomalies and sensor faults,
+derives a **multi-mode failure label**, and writes tidy tables (Parquet / CSV /
 DuckDB) ready for any downstream machine-learning or data-quality work.
 
 **The data is the product.** The model that consumes it can be deliberately
@@ -37,10 +38,11 @@ detection) has something real to work on.
 The signal model is grounded in the **publicly documented SAE J1939 standard** —
 the heavy-duty CAN application layer — using its published PGN/SPN structure,
 value ranges, units and scaling for signals like engine RPM, coolant temperature,
-fuel rate, engine load and oil pressure. The relationships *between* signals (fuel
-rate tracking load and RPM, coolant temperature responding to ambient and load,
-vibration rising with load and wear) come from **documented physics**, not from
-any proprietary log.
+fuel rate, engine load, oil pressure, boost/intake pressure, EGT and vibration. The
+relationships *between* signals (fuel rate tracking load and RPM, coolant
+temperature responding to ambient and load, EGT rising at altitude, vibration
+rising with terrain and wear) come from **documented physics**, not from any
+proprietary log.
 
 - **No real telemetry is shipped or used as a seed.** A permissively-licensed
   public CAN/OBD dataset may be used **only to validate** that the generated
@@ -51,14 +53,37 @@ any proprietary log.
 - **Clean room.** Built from the standard and known physics; contains no
   proprietary code or data.
 
+## What makes it different
+
+A few realism choices set it apart from a generic random-signal generator (full
+rationale in [`docs/DECISIONS.md`](docs/DECISIONS.md)):
+
+- **Two-layer realism.** A *fleet-composition* layer (operator → regions →
+  contracts → units, with realistic machinery mix, age curve and units per
+  contract) sits under the J1939 *signal* layer. Credibility comes from both, not
+  from any single real log.
+- **CAN capability gated by model-year era.** Older units only expose the SPNs
+  their bus actually supported — unsupported signals are emitted as **`NULL`, never
+  zero**. Structural missingness a downstream model has to handle, the way real
+  mixed-age fleets behave.
+- **Multi-mode failures.** Distinct failure modes (overheating, oil starvation,
+  bearing/mechanical wear) each build their own signal signature, so the prediction
+  target is genuinely learnable and per-mode evaluable.
+- **Environment that wears the machine.** Per-region **thermal + wear + terrain /
+  road-quality** modifiers (grounded in public data) shift signal baselines *and*
+  accelerate failure hazards — the seam a future drift demo shifts.
+
 ## What it generates (target)
 
 ```
-config (fleet, regions, climate, season, anomaly rates, seed)
-   └─► signal model      J1939-grounded per-signal generators + correlations
-        └─► fleet sim     N units (model, age) over time, regional/seasonal modifiers
-             └─► faults    labeled outliers + sensor faults (stuck / drift / dropout)
-                  └─► label failure_within_h derived from signals + wear + age
+config (fleet, regions, climate, terrain, season, anomaly rates, resolution, seed)
+   └─► fleet composition  operator → contracts → units (model, build year, duty)
+        └─► signal model   J1939-grounded per-signal generators + correlations,
+        │                  gated by capability era (unsupported SPN → NULL)
+        └─► fleet sim      units over time at configurable resolution; thermal /
+             │             wear / terrain modifiers per region
+             └─► faults     labeled outliers + sensor faults (stuck / drift / dropout)
+                  └─► label  multi-mode failure_within_h (overheat / oil / bearing)
                        └─► tidy tables → Parquet / CSV / DuckDB + data dictionary
 ```
 
@@ -73,10 +98,11 @@ forge generate --config configs/fleet.yaml --seed 42 --out out/
 Richness is sequenced so the repo ships fast and grows on a roadmap (full spec in
 [`docs/DATA_DESIGN.md`](docs/DATA_DESIGN.md)):
 
-- **Tier 1 (MVP):** one fleet, core J1939 signals, an age/wear-driven failure
-  label, deliberate bad data and obvious labeled outliers.
-- **Tier 2:** multiple regions/contracts with climate baselines, multiple
-  equipment models, seasonal effects.
+- **Tier 1 (MVP):** one fleet with realistic composition, core J1939 signals gated
+  by capability era, a multi-mode failure label, deliberate bad data and obvious
+  labeled outliers.
+- **Tier 2:** multiple regions/contracts with climate, terrain and seasonal
+  effects, multiple equipment models with distinct failure profiles.
 - **Tier 3:** subtle/joint outliers and sensor/CAN-fault patterns.
 
 ## Roadmap
