@@ -49,7 +49,7 @@ PGNs recorded but inert (ADR-013).
 
 ---
 
-## F2 — Fleet simulator + writers (Tier 1 ships)  ☐  ← MVP
+## F2 — Fleet simulator + writers (Tier 1 ships)  ✅  ← MVP
 
 **Objective.** Generate a reproducible Tier-1 dataset for a configurable fleet
 from one command.
@@ -62,6 +62,20 @@ outliers included.
 **DoD.** One command produces a documented Tier-1 dataset; same seed → identical
 output (tested); README shows the one-command run; offline tests for the writers
 and label derivation.
+
+**Shipped.** `config.py` (declarative config + public-grounded fleet/region
+catalog + seed plumbing; JSON config merging onto a runnable default, ADR-015).
+`sim/` (fleet composition: 5-class mix, triangular age curve with a legacy tail,
+per-contract sizes; per-unit driver synthesis from region climate/terrain/wear;
+the simulator threading one spawned `SeedSequence` per unit per stage).
+`labels/failure.py` (multi-mode `failure_within_h` + `failure_mode`, derived in one
+place, ADR-009). `anomalies/outliers.py` (labeled obvious outliers, recoverable —
+the F3 slice that ships now, ADR-006). `io/writers.py` (Parquet/CSV/DuckDB +
+`manifest.json` provenance + generated `dataset_dictionary.md`). `forge generate
+--config --seed --out --format --days --resolution` wired over the library. Regions
+pinned to cited public sources (ADR-014). **31 new offline tests (59 total green).**
+Verified end-to-end: default fleet → 106 units, 915,840 readings, all three failure
+modes present, EGT NULL for the pre-Modern 57%.
 
 ---
 

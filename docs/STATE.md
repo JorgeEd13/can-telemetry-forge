@@ -4,67 +4,69 @@ Updated: 2026-06-23
 
 ## Current focus
 
-**F1 is done.** The J1939-grounded signal model is built, tested, and documented.
-Next is **F2 — the fleet simulator + writers (Tier 1 ships)**: compose the F1
-per-unit signal model across N units over a time window, derive the multi-mode
-failure label in one place, and write tidy Parquet / CSV / DuckDB tables from one
-`forge generate` command.
+**F2 is done — the MVP (Tier 1) ships.** One command (`forge generate`) produces a
+complete, reproducible dataset: a realistically composed fleet of units emitting
+the 11 J1939 signals over time, gated by CAN capability era, with a multi-mode
+failure label, labeled obvious outliers, and tidy Parquet/CSV/DuckDB tables plus a
+manifest and generated data dictionary. Next is **F3 — richer labeled anomalies**
+(subtle/joint outliers + sensor faults), then F4 (distribution validation) and F5
+(Tier-2/3 diversity).
 
 ## Done
 
-- **F0 — Foundations & runnable skeleton** (src-layout package, `forge` CLI with
-  honest stub subcommands, CI on Linux+Windows × Py 3.11/3.12, first offline tests).
-- **DATA_DESIGN fully co-written** (two-layer realism, CAN era capability,
-  multi-mode failure label, environment = thermal+wear+terrain, configurable
-  resolution/scale). ADR-007…011.
-- **F1 — Signal model (J1939-grounded core):**
-  - `src/can_telemetry_forge/signals/` package:
-    - `spec.py` — declarative `SignalSpec` **registry** (ADR-012), single source of
-      truth: the 11 Tier-1 signals with real **J1939 SPN + PGN + unit + operating
-      range + capability era + driver list**. `Era` enum (Legacy/Mid/Modern +
-      always-on sentinel).
-    - `eras.py` — capability-era gating (ADR-008): model-year → era; a signal a
-      unit's era doesn't support is **NULL, never zero**. Structural missingness,
-      kept distinct from (future) sensor-fault dropouts.
-    - `generators.py` — **deterministic** per-signal functions of (drivers, wear/env
-      state, one seeded `np.random.Generator`); documented cross-signal correlations
-      (fuel↑load·rpm, coolant↑ambient+load+wear, oil↓wear, EGT↑altitude+load,
-      boost↓altitude, vibration↑terrain+wear, runtime monotonic). Values clamped to
-      the documented J1939 ranges. Magnitudes are first-pass constants (refine F5).
-    - `__init__.py` — public API (registry + gating + `generate_unit`).
-  - `docs/DATA_DICTIONARY.md` committed — every field → SPN (+PGN column, **inert**
-    per ADR-013) + unit + range + era + drivers; era table; correlation signs.
-  - `tests/test_signals.py` — 21 offline tests: registry consistency, ranges,
-    era-gating NULL, all 7 correlation signs, era-boundary mapping, determinism
-    (same seed → identical; different seed → differs). **28 tests total, green.**
-  - ADR-012 (signal registry) + ADR-013 (PGN recorded but inert) recorded.
+- **F0 — Foundations & runnable skeleton** (src-layout package, `forge` CLI, CI on
+  Linux+Windows × Py 3.11/3.12, offline tests).
+- **F1 — Signal model (J1939-grounded core):** `signals/` package — declarative
+  `SignalSpec` registry (ADR-012), capability-era gating (`eras.py`, NULL-not-zero,
+  ADR-008), deterministic per-signal generators (`generators.py`), PGNs recorded
+  but inert (ADR-013). `docs/DATA_DICTIONARY.md` committed.
+- **F2 — Fleet simulator + writers (Tier 1 MVP):**
+  - `config.py` — declarative config + **public-grounded fleet/region catalog** +
+    seed plumbing. JSON config merging onto a runnable `default_config()` (ADR-015).
+    Regions pinned to cited public **Köppen climate types + IRI road-roughness
+    bands** (ADR-014; `source` travels in the `regions` table).
+  - `sim/fleet.py` — operator→contracts→units: 5-class vehicle mix, triangular age
+    curve with a legacy tail, per-contract sizes drawn around an expected value;
+    build year → era; runtime/age at window start.
+  - `sim/drivers.py` — per-unit `DriverSeries` (duty rhythm, region ambient
+    sinusoid, altitude/terrain, monotonic accumulated wear) feeding F1.
+  - `labels/failure.py` — **multi-mode** `failure_within_h` + `failure_mode`
+    (overheat / oil_starve / bearing), hazard from era-gated signals + wear,
+    sampled & derived in **one place** (ADR-009).
+  - `anomalies/outliers.py` — labeled obvious out-of-range outliers, recoverable
+    from an `is_outlier` mask (ADR-006; the F3 slice that ships in the MVP).
+  - `sim/simulate.py` — composes it all over the fleet × window into a tidy long
+    `readings` table + dimension tables. One spawned `SeedSequence` per unit per
+    stage → independent yet reproducible streams (ADR-005).
+  - `io/writers.py` — Parquet / CSV / DuckDB + `manifest.json` (provenance) +
+    generated `dataset_dictionary.md`.
+  - `cli.py` — `forge generate --config --seed --out --format --days --resolution`
+    over the library; `forge validate` still a stub (F4).
+  - `configs/fleet.json` — shipped sample config.
+  - **31 new offline tests (59 total green.)** Verified end-to-end: default fleet →
+    106 units, 915,840 readings, all three failure modes present (overheat 34k /
+    oil_starve 16k / bearing 12k), EGT NULL for the pre-Modern 57%, era mix
+    45 Modern / 44 Mid / 17 Legacy.
 
 ## Next step (concrete)
 
-**F2 — fleet simulator + writers (the MVP cut).**
+**F3 — Anomaly & fault injection (labeled).** Extend the obvious-outlier slice
+(already shipped) with:
 
-1. **Fleet composition** (`sim/`): operator → contracts → units (model, build year →
-   era, region/duty). Realistic vehicle mix / age curve / units-per-contract from
-   the config catalog (public-grounded plausibility — fill the §"Still open"
-   distributions). One seeded rng threaded from config (ADR-005).
-2. **Driver series** per unit (duty cycle, ambient, altitude, terrain, wear) at the
-   configurable resolution — these feed `DriverSeries` into the F1 `generate_unit`.
-3. **Multi-mode failure label** (overheat / oil-starvation / bearing-wear), derived
-   in **one place** (ADR-009): horizon `failure_within_h` + mode.
-4. **Writers** (`io/`): tidy long table + dimension tables (units/models/regions) +
-   label table → Parquet / CSV / DuckDB. Include deliberate obvious labeled outliers.
-5. Wire `forge generate --config --seed --out`; same seed → identical output (test).
-
-Open specifics to fill in F2 (DATA_DESIGN §"Still open"): concrete vehicle-mix /
-age-curve / units-per-contract distributions; the public regional/climate/
-road-quality sources to cite for the environment modifiers.
+1. **Subtle / joint outliers** — each column plausible alone, jointly inconsistent
+   (e.g. high fuel rate with low load; coolant hot with engine off). New label.
+2. **Sensor faults** — stuck channel, single-channel drift, dropout — **distinct
+   from** the structural era-NULLs (a healthy-capable channel going bad). New label
+   column/table.
+3. Tests: each defect type present at its configured rate and fully recoverable
+   from labels; ADR for the labeled-injection contract (extends ADR-006).
 
 ## Notes
 
-- No GPU, no paid services, no training tokens — generation is local
-  NumPy/pandas; CI is free GitHub Actions.
-- Clean-room provenance is load-bearing: SAE J1939 standard + documented physics,
-  never a real-log seed. PGNs are recorded but the generator emits engineering-unit
-  series, not raw frames (a frame encoder is a future seam).
-- Determinism is a hard invariant: one seeded generator threaded through; the
-  hour-meter and equipment-age are noise-free by construction.
+- No GPU, no paid services, no training tokens — local NumPy/pandas; CI is free.
+- Clean-room provenance is load-bearing: SAE J1939 + documented physics + cited
+  public climate/road sources; fictional operator; never a real-log seed.
+- Determinism is a hard invariant: one master `SeedSequence` spawned into
+  per-stage child streams; same config + seed → byte-identical tables.
+- Config is JSON (stdlib, no YAML dep). The bundled default is a complete fleet, so
+  `--config` is optional.
