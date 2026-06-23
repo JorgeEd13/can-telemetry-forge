@@ -6,19 +6,24 @@
 ## Pipeline
 
 ```
-config (fleet, regions, climate, season, anomaly rates, seed)
+config (fleet, regions, climate, terrain, season, anomaly rates, resolution, seed)
    │
    ▼
-signal model        per-signal generators, J1939-grounded, seeded
-   │                cross-signal correlations documented in DATA_DESIGN
+fleet composition   operator → regions → contracts → units (model, build year,
+   │                duty); realistic mixes / age curve / units-per-contract
    ▼
-fleet simulator     N units (model, age) → time-series with regional /
-   │                climate / seasonal modifiers
+signal model        per-signal generators, J1939-grounded, seeded; cross-signal
+   │                correlations documented in DATA_DESIGN; **gated by capability
+   │                era** — a unit's era omits unsupported SPNs (NULL, not zero)
    ▼
-anomaly + faults    labeled outliers (obvious + subtle/joint) and sensor
-   │                faults (stuck / drift / dropout); each writes a label
+fleet simulator     units → time-series at configurable resolution, with
+   │                environment modifiers (thermal + wear + terrain) per region
    ▼
-label derivation    failure_within_h from signals + wear + age (single source)
+anomaly + faults    labeled outliers (obvious + subtle/joint) and sensor faults
+   │                (stuck / drift / dropout) — distinct from era-NULLs; each labels
+   ▼
+label derivation    multi-mode failure_within_h (overheat / oil-starve / bearing)
+   │                from signals + wear + age + environment (single source)
    ▼
 writers             tidy tables → Parquet / CSV / DuckDB + data dictionary
    │
@@ -38,6 +43,10 @@ CLI                 forge generate … ;  forge validate …
   the dataset is usable for *supervised* anomaly/QA work downstream.
 - **Standards traceability.** J1939-derived fields carry their SPN/units into the
   data dictionary, so the dataset is self-describing.
+- **Capability era is structural, not noise.** Each unit's model-year era declares
+  which SPNs its bus reports; unsupported signals are emitted as NULL (never zero).
+  The era→SPN map lives in the data dictionary as the single source of truth, and
+  this structural missingness is kept distinct from sensor-fault dropouts.
 - **Library + CLI.** Everything the CLI does is callable as a library function, so
   the future MLOps repo can import the generator directly instead of shelling out.
 

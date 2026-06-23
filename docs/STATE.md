@@ -4,10 +4,10 @@ Updated: 2026-06-23
 
 ## Current focus
 
-F0 is **done**: the package is installable and the `forge` CLI runs, with offline
-tests green and CI configured for Linux + Windows. Next is co-writing
-`docs/DATA_DESIGN.md` in full with the user, then F1 (the J1939-grounded signal
-model).
+F0 is **done** and **`docs/DATA_DESIGN.md` is now fully co-written**. The data spec
+is settled (two-layer realism, CAN capability by model-year era, multi-mode failure
+label, environment = thermal + wear + terrain, configurable resolution/scale).
+Next is **F1 — the J1939-grounded signal model + `docs/DATA_DICTIONARY.md`**.
 
 ## Done
 
@@ -17,6 +17,18 @@ model).
 - Start-of-project decisions taken with the user (domain, grounding, tiers, scope).
 - PLAN.md + CLAUDE.md + docs skeletons (this file, ROADMAP, DATA_DESIGN,
   ARCHITECTURE, DECISIONS) written.
+- **DATA_DESIGN co-writing session (with the user):** the spec is now full, not a
+  skeleton. Key outcomes (ADR-007…011):
+  - **Two-layer realism** — fleet composition (operator/region/contract/unit,
+    mixes/age/duty) + J1939 signal model; environment couples them.
+  - **CAN capability by model-year era** — older units omit newer SPNs (NULL, not
+    zero); signature feature.
+  - **Multi-mode failure label** (overheat / oil-starvation / bearing-wear),
+    superseding the single age/wear label; records horizon + mode.
+  - **Environment** = thermal + wear + **terrain/road-quality** modifiers, all
+    public-data-grounded.
+  - **Configurable** time resolution (default `1min`) and fleet scale
+    (medium-leaning default ~100 units × ~90 days).
 - **F0 — Foundations & runnable skeleton:**
   - src-layout package `src/can_telemetry_forge` (`__init__` with `__version__`
     sourced from installed metadata + literal fallback; `cli.py`).
@@ -31,12 +43,16 @@ model).
 
 ## Next step (concrete)
 
-1. Co-write `docs/DATA_DESIGN.md` in full with the user (their operational
-   experience with heavy equipment) — the signal list, ranges, units, and the
-   cross-signal correlations — before F1 begins.
-2. F1 — signal model: per-signal deterministic generators for the Tier-1 signals,
-   grounded in published J1939 ranges/units/scaling, with documented correlations
-   and `docs/DATA_DICTIONARY.md` mapping fields to SPNs.
+**F1 — signal model.** Per-signal deterministic generators for the Tier-1 signals,
+grounded in published J1939 ranges/units/scaling, with documented cross-signal
+correlations, **gated by capability era** (NULL for unsupported SPNs). Commit
+`docs/DATA_DICTIONARY.md` mapping each field → SPN + unit + capability era. Offline
+tests assert ranges, units, correlation signs, era-gating, and seed-reproducibility.
+
+Open specifics to fill during F1 (also listed in DATA_DESIGN "Still open"):
+- exact per-SPN J1939 ranges/scaling + the SPN-per-era table;
+- the public regional/climate/road-quality sources to cite for environment modifiers;
+- (F2) the concrete vehicle-mix / age-curve / units-per-contract distributions.
 
 ## Notes
 

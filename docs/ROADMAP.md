@@ -29,15 +29,17 @@ CI green on Linux + Windows.
 **Objective.** Per-signal generators for the Tier-1 signals, grounded in published
 J1939 ranges/units/scaling and documented cross-signal correlations.
 
-**How.** Signals: engine RPM, coolant temperature, fuel rate, engine load, oil
-pressure, vibration, runtime hours, equipment age. Each generator seeded and
+**How.** Signals (engine-core + drivetrain extras, see DATA_DESIGN §5): engine RPM,
+coolant temp, oil pressure, runtime hours, engine load, fuel rate, intake/boost
+pressure, EGT, DEF level, vibration, equipment age. Each generator seeded and
 deterministic; correlations documented (e.g. fuel rate ↔ load·RPM, coolant temp ↔
-ambient + load). `docs/DATA_DICTIONARY.md` maps each field to its J1939 SPN where
-applicable.
+ambient + load, EGT ↔ altitude + load, vibration ↔ terrain + wear). Signals are
+**gated by capability era** — a unit's era omits unsupported SPNs (NULL, not zero).
+`docs/DATA_DICTIONARY.md` maps each field to its J1939 SPN + unit + capability era.
 
-**DoD.** Offline tests assert ranges, units, correlation signs and
-seed-reproducibility; data dictionary committed; ADR for the J1939 + physics
-grounding choice.
+**DoD.** Offline tests assert ranges, units, correlation signs, **era-gating**
+(unsupported SPN → NULL), and seed-reproducibility; data dictionary committed; ADRs
+for the J1939+physics grounding and era-gating (ADR-008) recorded.
 
 ---
 

@@ -101,3 +101,107 @@ recoverable from labels.
 **Consequences.** The dataset supports supervised anomaly detection and verifiable
 QA. Tests assert each defect type is present at its configured rate and fully
 label-recoverable. (Detailed in F3.)
+
+---
+
+## ADR-007 — Two-layer realism: fleet composition + signal model
+
+**Context.** The natural assumption was that "domain experience" means modeling the
+telemetry signals from real logs. It does not — usable real telemetry is
+effectively absent. The genuine domain strength is knowing **how a real operator is
+composed and deployed**: machinery mix, fleet age curve, units per contract, which
+region gets which vehicle, and how each environment wears the machine.
+
+**Decision.** Model the dataset in **two grounded layers**: a **fleet-composition
+layer** (operator → regions → contracts → units, with realistic mixes/age/duty) and
+a **signal layer** (J1939-grounded per-signal model). Environment couples them
+(climate/terrain shift baselines *and* failure hazards). Credibility comes from both
+layers being independently defensible, not from any single real log.
+
+**Consequences.** The showcase leads with a rarer strength (realistic fleet
+structure) rather than competing on signal fidelity alone. The fleet layer's exact
+proportions are grounded in **public** data + documented plausibility and filled
+into the config catalog at build time, not guessed in the design doc.
+
+---
+
+## ADR-008 — CAN capability gated by model-year era
+
+**Context.** Real machines only report the SPNs their electronics support; an older
+unit's bus simply does not expose newer signals. Most synthetic CAN datasets ignore
+this and emit a full uniform schema, which is both unrealistic and a missed
+learning challenge.
+
+**Decision.** Group model years into **capability eras** (e.g. Legacy / Mid /
+Modern); each era exposes a defined SPN subset. A signal a unit's era does not
+support is emitted as **NULL (missing), never zero**, and the schema documents which
+signals are era-gated. MVP uses coarse eras; a per-model SPN whitelist is a Tier-2
+(F5) refinement.
+
+**Consequences.** Distinctive, realistic structural missingness that downstream
+models must handle (not impute as a real reading). Couples to the fleet age curve
+(ADR-007): an older fleet yields a sparser schema. Requires keeping era→SPN mapping
+in the data dictionary as the single source of truth.
+
+---
+
+## ADR-009 — Multi-mode failure label (supersedes the age/wear label in ADR-004)
+
+**Context.** ADR-004's Tier-1 sketch used a single age/wear failure label. A single
+near-deterministic label gives a downstream model little to learn and no failure
+signature to discriminate.
+
+**Decision.** Model **several distinct failure modes** (overheat, oil-starvation,
+bearing/mechanical wear), each with its own signal signature and its own
+documented hazard rising with accumulated wear/age **and** sustained abnormal
+conditions, modified by environment. The label records both the **horizon**
+(`failure_within_h`, `h` configurable) and the **mode**, and is derived in exactly
+one place. Hazard→event sampling is seeded.
+
+**Consequences.** Richer, genuinely learnable target with per-mode evaluation
+downstream; sets up a more interesting future model and drift story. More to model
+and test than a single label, but still Tier-1-scoped. This replaces the single
+age/wear label framing in ADR-004.
+
+---
+
+## ADR-010 — Environment modifiers grounded in public climate + terrain data
+
+**Context.** An international operator's diversity should be more than cosmetic
+baseline shifts. Environment genuinely changes how machines wear — and it must be
+grounded without any private data.
+
+**Decision.** Each region carries **seeded, documented modifiers** from **public**
+sources: a **thermal** channel (ambient/humidity/altitude → coolant/oil/EGT
+baselines and fuel efficiency), a **wear** channel (hot/dusty/humid → accelerated
+oil/filter/thermal-cycling hazards), and a **terrain/road-quality** channel (public
+roughness/grade data → vibration and suspension/structural/bearing wear, sustained
+load on grade). Each modifier documents source, direction, and rough magnitude.
+
+**Consequences.** Visible, defensible international diversity and a natural seam for
+the future drift demo (shift a region's climate). Adds a dependency on citing public
+regional/infrastructure sources (tracked as open in DATA_DESIGN §"Still open").
+
+---
+
+## ADR-011 — Configurable time resolution and fleet scale, with defaults
+
+**Context.** Resolution and scale trade realism against file size, test speed, and
+how many failures a dataset contains.
+
+**Decision.** Make **time resolution** a config knob (`1s` / `1min` / `5min`),
+default **`1min`** (typical telemetry-platform cadence; `1s` downsamples J1939's
+faster native rates, coarser values aggregate). Make **fleet scale**
+(`--units`/`--days`/`--seed`) configurable with a **medium-leaning default**
+(~100 units × ~90 days) so a default run holds enough failures to train the future
+model, while a small test profile stays CI-friendly.
+
+**Consequences.** One command scales from a browsable demo to a trainable dataset.
+Tests run on the small profile; the README documents both. More config surface to
+validate.
+
+> **Provenance note (private boundary).** The *plausibility intuition* behind fleet
+> proportions may be informed privately by the author's real-world operational
+> experience, but **no private data, numbers, or source is ever committed,
+> documented, or exposed here** — the repo is grounded solely on the fictional
+> operator + public sources. (Boundary recorded outside this repo.)
