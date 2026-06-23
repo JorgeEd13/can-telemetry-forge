@@ -24,7 +24,7 @@ CI green on Linux + Windows.
 
 ---
 
-## F1 — Signal model (J1939-grounded core)  ☐
+## F1 — Signal model (J1939-grounded core)  ✅
 
 **Objective.** Per-signal generators for the Tier-1 signals, grounded in published
 J1939 ranges/units/scaling and documented cross-signal correlations.
@@ -40,6 +40,12 @@ ambient + load, EGT ↔ altitude + load, vibration ↔ terrain + wear). Signals 
 **DoD.** Offline tests assert ranges, units, correlation signs, **era-gating**
 (unsupported SPN → NULL), and seed-reproducibility; data dictionary committed; ADRs
 for the J1939+physics grounding and era-gating (ADR-008) recorded.
+
+**Shipped.** `signals/` package: declarative `SignalSpec` registry (ADR-012) with
+the 11 Tier-1 signals' real J1939 SPN/PGN/unit/range, era gating (`eras.py`,
+NULL-not-zero), deterministic per-signal generators (`generators.py`) threading one
+seeded rng. `docs/DATA_DICTIONARY.md` committed. 21 offline tests (28 total green).
+PGNs recorded but inert (ADR-013).
 
 ---
 
