@@ -1,14 +1,16 @@
 """Command-line entry point for can-telemetry-forge.
 
-Exposes the ``forge`` command. At F0 the skeleton only wires up argument parsing,
-``--version`` and the shape of the future subcommands; the generators land in the
-later phases (see ``docs/ROADMAP.md``). Subcommands that are not implemented yet
-say so honestly and exit non-zero rather than pretending to work.
+Exposes the ``forge`` command. ``forge generate`` (F2) produces a reproducible
+Tier-1 dataset from a config + seed; ``forge validate`` (F4) is still a stub that
+fails honestly. Everything ``generate`` does is a thin wrapper over the library
+(``config`` → ``sim.simulate`` → ``io.write_dataset``) so a downstream consumer can
+import it directly instead of shelling out.
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 
 from . import __version__
@@ -36,15 +38,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
 
-    # `forge generate` — the headline command, implemented in F2 (Tier 1 ships).
+    # `forge generate` — the headline command (F2, Tier 1 ships).
     generate = subparsers.add_parser(
         "generate",
-        help="generate a Tier-1 telemetry dataset (coming in F2)",
+        help="generate a Tier-1 telemetry dataset",
         description="Generate a reproducible telemetry dataset from a config + seed.",
     )
-    generate.add_argument("--config", help="path to the fleet config file")
-    generate.add_argument("--seed", type=int, default=42, help="random seed (default: 42)")
-    generate.add_argument("--out", help="output directory for the generated tables")
+    generate.add_argument("--config", help="path to a JSON fleet config (default: bundled fleet)")
+    generate.add_argument("--seed", type=int, help="random seed (overrides the config seed)")
+    generate.add_argument("--out", required=True, help="output directory for the generated tables")
+    generate.add_argument(
+        "--format",
+        choices=("parquet", "csv", "duckdb"),
+        default="parquet",
+        help="output format (default: parquet)",
+    )
+    generate.add_argument("--days", type=int, help="window length in days (overrides config)")
+    generate.add_argument(
+        "--resolution",
+        choices=("1s", "1min", "5min"),
+        help="time resolution (overrides config)",
+    )
 
     # `forge validate` — distribution validation, implemented in F4 (opt-in).
     validate = subparsers.add_parser(
@@ -60,6 +74,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_generate(args: argparse.Namespace) -> int:
+    """Execute ``forge generate`` over the library. Returns an exit code."""
+    from dataclasses import replace
+
+    from .config import load_config
+    from .io import write_dataset
+    from .sim import simulate
+
+    config = load_config(args.config)
+    overrides: dict = {}
+    if args.seed is not None:
+        overrides["seed"] = args.seed
+    if args.days is not None:
+        overrides["days"] = args.days
+    if args.resolution is not None:
+        overrides["resolution"] = args.resolution
+    if overrides:
+        config = replace(config, **overrides).validate()
+
+    dataset = simulate(config)
+    out = write_dataset(dataset, args.out, fmt=args.format)
+    print(
+        f"forge generate: wrote {dataset.readings.shape[0]:,} readings for "
+        f"{dataset.units.shape[0]} units → {out} ({args.format}, seed {config.seed}).",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the ``forge`` CLI. Returns a process exit code."""
     parser = build_parser()
@@ -69,12 +112,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    # The pipeline lands phase by phase; until then, fail honestly.
-    phase = {"generate": "F2", "validate": "F4"}[args.command]
+    if args.command == "generate":
+        return _run_generate(args)
+
+    # `forge validate` lands in F4; until then, fail honestly.
     parser.exit(
         _NOT_IMPLEMENTED_EXIT,
-        f"forge {args.command}: not implemented yet — lands in {phase} "
-        f"(see docs/ROADMAP.md).\n",
+        "forge validate: not implemented yet — lands in F4 (see docs/ROADMAP.md).\n",
     )
 
 

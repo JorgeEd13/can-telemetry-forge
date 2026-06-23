@@ -251,3 +251,42 @@ generator does not depend on them.
 at near-zero cost, without adding frame-encoding complexity to the MVP. When a
 frame-level output mode is wanted (noted in DATA_DICTIONARY "Not yet in Tier 1"),
 the PGN is already there.
+
+---
+
+## ADR-014 — Regions grounded in cited public climate + road-quality sources now
+
+**Context.** ADR-010 set environment modifiers (thermal/wear/terrain) as the
+realism lever and flagged the concrete regional constants as "still open". For F2
+the choice was: ship fictional archetype numbers now and cite real sources later
+(F5), or pin each region to a named public source class immediately.
+
+**Decision.** Pin the MVP regions to **named public source classes now**: each
+region's climate constants are documented plausibility from a public **Köppen
+climate type** (e.g. BWk arid-highland, Cfb temperate-oceanic, Af tropical,
+Dfb cold-continental), and its terrain roughness from a public **International
+Roughness Index (IRI)** road-quality band. The `source` string travels *in the
+data* (the `regions` dimension table) and is traced in DATA_DESIGN §6. The operator
+remains **fictional**; the numbers are public-grounded plausibility, not values
+copied from any private log (the private-boundary note in ADR-011 still holds).
+
+**Consequences.** Provenance is defensible at MVP, not deferred — a reader can see
+*why* a region's baselines are what they are, and the citation ships with every
+dataset. F5 still broadens the set and can move to finer per-region normals.
+
+---
+
+## ADR-015 — Config is JSON (stdlib), not YAML
+
+**Context.** The generator is config-driven. The README sketch used `fleet.yaml`,
+but YAML needs a third-party parser (PyYAML), which would be a new core dependency
+purely for config ergonomics — against the "lean core + lean CI" principle.
+
+**Decision.** Use **JSON** config files, parsed with the standard library. A config
+file overrides any subset of the bundled default (nested fleet keys merge), so a
+small file can tweak just `seed`/`days`. The bundled `default_config()` is a
+complete, runnable fleet, so `--config` is optional.
+
+**Consequences.** Zero added dependencies; config loads with stdlib; CI stays lean.
+Cost is JSON's lack of comments (mitigated with a `_comment` field in the shipped
+`configs/fleet.json`). README/DATA_DESIGN updated from `.yaml` to `.json`.

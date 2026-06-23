@@ -1,0 +1,8 @@
+{
+  "_comment": "Sample fleet config for can-telemetry-forge. Any subset of keys overrides the bundled default fleet (see src/can_telemetry_forge/config.py). Regions are a FICTIONAL operator with public-grounded climate/terrain constants traced in docs/DATA_DESIGN.md §6 — never real data. This file reproduces the bundled default at a smaller, browsable scale.",
+  "days": 30,
+  "resolution": "5min",
+  "seed": 42,
+  "failure_horizon_h": 168.0,
+  "obvious_outlier_rate": 0.002
+}

@@ -164,6 +164,22 @@ seeded modifiers grounded in **public** climate and infrastructure data:
 All modifiers are documented (source + direction + rough magnitude), seeded, and
 testable. MVP may ship a small set of contrasting environments; F5 broadens them.
 
+**MVP regions (shipped in F2, ADR-014).** Four contrasting deployments of the
+fictional operator, each pinned to a **named public source class** (the `source`
+string travels in the `regions` dimension table of every dataset):
+
+| Region | Climate grounding (public) | Terrain grounding (public) | Effect |
+|---|---|---|---|
+| **arid_highland** | Köppen **BWk** arid-highland normals (hot, dusty, ~2400 m) | IRI "unpaved/poor" band (~8–12 m/km) | high wear (heat+dust), high EGT at altitude |
+| **temperate_lowland** | Köppen **Cfb** temperate-oceanic normals (mild, ~120 m) | IRI "good paved" band (~2–4 m/km) | gentlest baseline + lowest wear |
+| **tropical_humid** | Köppen **Af** tropical-rainforest normals (hot, wet, ~200 m) | IRI "off-road/very poor" band (>12 m/km) | high wear (humidity+rough off-road) |
+| **cold_continental** | Köppen **Dfb** cold-continental normals (cold winters, ~600 m) | IRI "fair paved" band (~4–6 m/km) | thermal-cycling hazard, mixed terrain |
+
+These are **documented plausibility from public climate-type / road-roughness
+references for a fictional operator** — never values copied from any private log
+(the ADR-011 private-boundary note holds). Concrete constants live in the config
+catalog (`src/can_telemetry_forge/config.py`).
+
 ---
 
 ## 7. Failure label — multi-mode (Tier 1)
@@ -262,11 +278,15 @@ These are settled; remaining specifics get committed during F1/F2.
 - **Failure label multi-mode** (overheat / oil-starvation / bearing-wear).
 - **Scale configurable**, medium-leaning default.
 
-## Still open (fill during F1/F2)
+## Still open
 
-- Exact per-SPN J1939 ranges/scaling and the SPN-per-era table → `DATA_DICTIONARY.md`.
-- The concrete vehicle-mix, age-curve, and units-per-contract distributions.
-- Which public regional/climate/road-quality sources to cite for the environment
-  modifiers.
+- ~~Exact per-SPN J1939 ranges/scaling and the SPN-per-era table~~ → done (F1,
+  `DATA_DICTIONARY.md`).
+- ~~The concrete vehicle-mix, age-curve, and units-per-contract distributions~~ →
+  done (F2, config catalog: 5-class mix, triangular age curve with a legacy tail,
+  per-contract sizes drawn around an expected value).
+- ~~Which public regional/climate/road-quality sources to cite~~ → done (F2,
+  ADR-014: Köppen climate types + IRI road-roughness bands; see §6).
 - Which public CAN/OBD/J1939 dataset to validate distributions against (license
   check — F4).
+- Finer per-region climate normals / per-model SPN whitelists (Tier 2 — F5).

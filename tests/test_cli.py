@@ -46,24 +46,24 @@ def test_help_flag_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     assert "usage:" in capsys.readouterr().out.lower()
 
 
-@pytest.mark.parametrize(
-    ("command", "phase"),
-    [("generate", "F2"), ("validate", "F4")],
-)
-def test_unimplemented_subcommands_fail_honestly(
-    command: str,
-    phase: str,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_validate_still_fails_honestly(capsys: pytest.CaptureFixture[str]) -> None:
+    # `forge validate` lands in F4; until then it must fail honestly, not pretend.
     with pytest.raises(SystemExit) as exc:
-        main([command])
+        main(["validate"])
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert "not implemented" in err.lower()
-    assert phase in err
+    assert "F4" in err
+
+
+def test_generate_requires_out() -> None:
+    # `--out` is required now that generate actually writes files.
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["generate"])
 
 
 def test_generate_defaults_parse() -> None:
-    args = build_parser().parse_args(["generate"])
+    args = build_parser().parse_args(["generate", "--out", "x"])
     assert args.command == "generate"
-    assert args.seed == 42
+    assert args.seed is None  # falls back to the config seed when unset
+    assert args.format == "parquet"
