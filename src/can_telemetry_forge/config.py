@@ -28,6 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .anomalies import ANOMALY_TYPES, DEFAULT_ANOMALY_RATES
+
 # --- resolution ---------------------------------------------------------------
 
 # Supported time resolutions → step in hours (ADR-011). MVP default is 1 minute,
@@ -129,16 +131,35 @@ class ForgeConfig:
     """Top-level generation config — the single source of *what to generate*.
 
     ``days`` × ``resolution`` define each unit's time window; ``failure_horizon_h``
-    is the label horizon ``h`` (ADR-009); ``obvious_outlier_rate`` is the F2 slice
-    of labeled bad data (ADR-006). ``seed`` is the master seed (ADR-005).
+    is the label horizon ``h`` (ADR-009); ``seed`` is the master seed (ADR-005).
+
+    Labeled defects (ADR-006/-016) are driven by ``anomaly_rates``: an
+    ``anomaly_type`` → rate map (per-eligible-cell for outliers; per-step
+    segment-start for sensor faults). Any subset overrides the bundled defaults
+    (:data:`~can_telemetry_forge.anomalies.DEFAULT_ANOMALY_RATES`); unset types
+    fall back to those defaults. ``obvious_outlier_rate`` is a back-compat
+    convenience that, when set, overrides the ``obvious_outlier`` entry.
     """
 
     fleet: FleetSpec
     days: int = 90
     resolution: str = DEFAULT_RESOLUTION
     failure_horizon_h: float = 168.0  # one week
-    obvious_outlier_rate: float = 0.002
+    obvious_outlier_rate: float | None = None  # back-compat alias for anomaly_rates["obvious_outlier"]
+    anomaly_rates: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_ANOMALY_RATES))
     seed: int = 42
+
+    def resolved_anomaly_rates(self) -> dict[str, float]:
+        """The effective ``anomaly_type`` → rate map (defaults + overrides).
+
+        Starts from :data:`DEFAULT_ANOMALY_RATES`, applies ``anomaly_rates``, then
+        the back-compat ``obvious_outlier_rate`` (if set) wins for that one type.
+        """
+        rates = dict(DEFAULT_ANOMALY_RATES)
+        rates.update(self.anomaly_rates)
+        if self.obvious_outlier_rate is not None:
+            rates["obvious_outlier"] = self.obvious_outlier_rate
+        return rates
 
     def step_hours(self) -> float:
         """Time between successive readings, in hours (from ``resolution``)."""
@@ -163,8 +184,15 @@ class ForgeConfig:
             )
         if self.days <= 0:
             raise ValueError("days must be positive")
-        if not (0.0 <= self.obvious_outlier_rate < 1.0):
+        if self.obvious_outlier_rate is not None and not (0.0 <= self.obvious_outlier_rate < 1.0):
             raise ValueError("obvious_outlier_rate must be in [0, 1)")
+        known_types = set(ANOMALY_TYPES)
+        unknown_rates = set(self.anomaly_rates) - known_types
+        if unknown_rates:
+            raise ValueError(f"anomaly_rates references unknown types: {unknown_rates}")
+        for atype, rate in self.anomaly_rates.items():
+            if not (0.0 <= rate < 1.0):
+                raise ValueError(f"anomaly_rates[{atype!r}] must be in [0, 1)")
         if self.failure_horizon_h <= 0:
             raise ValueError("failure_horizon_h must be positive")
         f = self.fleet
@@ -322,7 +350,14 @@ def config_from_dict(d: dict) -> ForgeConfig:
     """Build a validated :class:`ForgeConfig` from a dict, merging onto defaults."""
     base = default_config()
     fleet = _fleet_from_dict(d.get("fleet", {}), base.fleet)
-    top = {k: v for k, v in d.items() if k in {"days", "resolution", "failure_horizon_h", "obvious_outlier_rate", "seed"}}
+    top = {
+        k: v
+        for k, v in d.items()
+        if k in {"days", "resolution", "failure_horizon_h", "obvious_outlier_rate", "seed"}
+    }
+    # anomaly_rates merges onto the defaults (a small file can tweak one type).
+    if "anomaly_rates" in d:
+        top["anomaly_rates"] = {**DEFAULT_ANOMALY_RATES, **dict(d["anomaly_rates"])}
     return replace(base, fleet=fleet, **top).validate()
 
 

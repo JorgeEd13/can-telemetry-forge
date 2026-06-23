@@ -70,8 +70,24 @@ All signals come from a single seeded `numpy` generator threaded in by the calle
 (ADR-005). Same era + drivers + seed → identical arrays. The hour-meter
 (`runtime_hours`) and `equipment_age_days` are noise-free by construction.
 
+## Label & anomaly columns (in `readings`)
+
+Beyond the signal columns, each reading row carries ground-truth labels:
+
+- `failure_within_h` (0/1) and `failure_mode` (`overheat` / `oil_starve` /
+  `bearing`, else empty) — the multi-mode failure target (ADR-009).
+- `anomaly_type` — the labeled defect on the row (else empty): `obvious_outlier` /
+  `joint_outlier` / `sensor_stuck` / `sensor_drift` / `sensor_dropout`
+  (ADR-006/-016). One per row by injector priority; era-`NULL` cells are never
+  targeted.
+- `anomaly_signal` — which signal carries that defect (empty if none).
+- `is_outlier` (bool) — back-compat rollup: true where the row carries a
+  *value-distorting* defect (everything except `sensor_dropout`, which blanks to
+  `NULL`).
+
 ## Not yet in Tier 1 (later phases)
 
 - Per-model SPN whitelists (finer than coarse eras) — F5.
 - Raw CAN frame layout (byte/bit positions per PGN) — would activate the PGN column.
-- Injected sensor/CAN faults and the multi-mode failure label — F3 / F2 label step.
+- CAN-frame fault patterns (malformed/implausible frames) — F5, once the frame
+  encoder exists; a new `anomaly_type` value, no schema change.

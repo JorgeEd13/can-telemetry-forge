@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..anomalies import ANOMALY_TYPES
 from ..signals import TIER1_SIGNALS, get_spec
 from ..sim.simulate import SimulatedDataset
 
@@ -63,6 +64,14 @@ def _write_duckdb(tables: dict[str, pd.DataFrame], out: Path) -> None:
 _WRITERS = {"parquet": _write_parquet, "csv": _write_csv, "duckdb": _write_duckdb}
 
 
+def _anomaly_type_counts(ds: SimulatedDataset) -> dict[str, int]:
+    """Row count per labeled defect type (ADR-016), for provenance."""
+    if ds.readings.empty or "anomaly_type" not in ds.readings:
+        return {atype: 0 for atype in ANOMALY_TYPES}
+    counts = ds.readings["anomaly_type"].value_counts()
+    return {atype: int(counts.get(atype, 0)) for atype in ANOMALY_TYPES}
+
+
 def _manifest(ds: SimulatedDataset, fmt: str) -> dict:
     cfg = ds.config
     return {
@@ -76,13 +85,14 @@ def _manifest(ds: SimulatedDataset, fmt: str) -> dict:
         "resolution": cfg.resolution,
         "days": cfg.days,
         "failure_horizon_h": cfg.failure_horizon_h,
-        "obvious_outlier_rate": cfg.obvious_outlier_rate,
+        "anomaly_rates": cfg.resolved_anomaly_rates(),
         "operator_name": cfg.fleet.operator_name,
         "format": fmt,
         "n_units": int(ds.units.shape[0]),
         "n_readings": int(ds.readings.shape[0]),
         "n_failure_rows": int(ds.readings["failure_within_h"].sum()) if not ds.readings.empty else 0,
         "n_outlier_rows": int(ds.readings["is_outlier"].sum()) if not ds.readings.empty else 0,
+        "n_anomaly_rows_by_type": _anomaly_type_counts(ds),
     }
 
 
@@ -109,7 +119,26 @@ def _dataset_dictionary_md(ds: SimulatedDataset) -> str:
     lines += [
         "| `failure_within_h` | 0/1 | — | 1 if a failure occurs within the horizon. |",
         "| `failure_mode` | — | — | overheat / oil_starve / bearing (else empty). |",
-        "| `is_outlier` | bool | — | True if this cell carries an injected obvious outlier. |",
+        "| `is_outlier` | bool | — | True if the row carries a value-distorting "
+        "defect (obvious/joint outlier or stuck/drift sensor fault). Back-compat rollup. |",
+        "| `anomaly_type` | — | — | Labeled defect on the row (else empty): "
+        + " / ".join(f"`{t}`" for t in ANOMALY_TYPES)
+        + ". One per row by injector priority. |",
+        "| `anomaly_signal` | — | — | Which signal carries the row's labeled defect "
+        "(empty if none). |",
+        "",
+        "### Labeled defects (`anomaly_type`)",
+        "",
+        "Every injected defect is recoverable from these labels (ADR-006/-016). "
+        "Era-`NULL` cells are never targeted — a sensor fault is a *healthy* channel "
+        "going bad, distinct from structural era-missingness.",
+        "",
+        "- `obvious_outlier` — a single out-of-range spike (impossible on its own).",
+        "- `joint_outlier` — each column in range but the **pair** is impossible "
+        "(e.g. high fuel rate with near-zero load).",
+        "- `sensor_stuck` — a channel frozen at one value over a contiguous segment.",
+        "- `sensor_drift` — a slow accumulating bias on one channel over a segment.",
+        "- `sensor_dropout` — a channel goes `NULL` over a segment (not era-gating).",
         "",
         "## Dimension tables",
         "",

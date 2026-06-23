@@ -1,8 +1,14 @@
 {
-  "_comment": "Sample fleet config for can-telemetry-forge. Any subset of keys overrides the bundled default fleet (see src/can_telemetry_forge/config.py). Regions are a FICTIONAL operator with public-grounded climate/terrain constants traced in docs/DATA_DESIGN.md §6 — never real data. This file reproduces the bundled default at a smaller, browsable scale.",
+  "_comment": "Sample fleet config for can-telemetry-forge. Any subset of keys overrides the bundled default fleet (see src/can_telemetry_forge/config.py). Regions are a FICTIONAL operator with public-grounded climate/terrain constants traced in docs/DATA_DESIGN.md §6 — never real data. This file reproduces the bundled default at a smaller, browsable scale. anomaly_rates maps each labeled defect type (ADR-016) to its rate; any subset merges onto the defaults.",
   "days": 30,
   "resolution": "5min",
   "seed": 42,
   "failure_horizon_h": 168.0,
-  "obvious_outlier_rate": 0.002
+  "anomaly_rates": {
+    "obvious_outlier": 0.002,
+    "joint_outlier": 0.02,
+    "sensor_stuck": 2e-05,
+    "sensor_drift": 2e-05,
+    "sensor_dropout": 2e-05
+  }
 }
