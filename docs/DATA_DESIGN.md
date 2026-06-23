@@ -206,21 +206,33 @@ on the ground truth.
 
 ---
 
-## 8. Anomalies & faults (labeled — F3)
+## 8. Anomalies & faults (labeled — F3, shipped)
 
 Every injected defect carries ground-truth labels so downstream QA/anomaly work is
-**verifiable** (recover the injection from the labels).
+**verifiable** (recover the injection from the labels). The injectors form a
+**declarative registry** (ADR-016) — each defect is one self-describing
+`AnomalyInjector` the orchestrator runs with mutual-exclusion eligibility, so at
+most one defect lands per (signal, timestamp) cell and era-`NULL` cells are never
+targeted. Labels surface as **one open-vocabulary categorical** (`anomaly_type`) +
+`anomaly_signal`, with `is_outlier` kept as a value-distortion rollup.
 
-- **Obvious outliers** (Tier 1, shipped in F2): out-of-range spikes, impossible
-  values.
-- **Subtle / joint outliers** (Tier 3): each column plausible alone, jointly
-  inconsistent (e.g. high fuel rate with low load; coolant hot with engine off).
-- **Sensor faults** (Tier 3): stuck channel, single-channel drift, dropout/missing
-  — *distinct from* the structural era-NULLs of §4 (a fault is a healthy-capable
-  channel going bad).
-- **CAN faults** (Tier 3): malformed / implausible frame patterns.
+Shipped families (each a configurable `anomaly_rates[...]` knob):
 
-Each has a configurable rate and a label column/table.
+- **`obvious_outlier`** (was the F2 slice): out-of-range spike, impossible on its
+  own — the easy univariate case.
+- **`joint_outlier`**: each column stays in its own valid range but the **pair** is
+  impossible (high fuel rate with near-zero load; hot coolant with the engine at
+  idle/off; boost with no load). Only a *contextual* check catches it.
+- **Sensor faults**, segment-based (a contiguous degradation episode, not per-cell
+  salt), *distinct from* the structural era-NULLs of §4 — a healthy-capable channel
+  going bad:
+  - **`sensor_stuck`** — frozen at one value over the segment.
+  - **`sensor_drift`** — a slow accumulating bias over the segment.
+  - **`sensor_dropout`** — the channel goes `NULL` over the segment.
+
+**Still Tier 3 (F5):** CAN-frame faults (malformed / implausible frame patterns)
+land once a frame-level encoder exists (the inert PGNs of ADR-013 are the seam).
+Adding them is a new registry entry + a new `anomaly_type` value — no schema change.
 
 ---
 

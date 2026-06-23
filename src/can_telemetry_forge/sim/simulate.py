@@ -6,15 +6,16 @@ This is the orchestration layer. From a validated
 1. builds the fleet (:func:`.fleet.build_fleet`);
 2. for each unit, synthesises its driver series (:func:`.drivers.drivers_for_unit`),
    runs the F1 per-signal model (``generate_unit``), derives the multi-mode failure
-   label **from the clean signals** (ADR-009), then injects obvious labeled
-   outliers (ADR-006) *after* labelling so a glitch is never mistaken for a failure
-   signature;
+   label **from the clean signals** (ADR-009), then injects the registry of labeled
+   defects (ADR-006/-016 — outliers + sensor faults) *after* labelling so a glitch
+   is never mistaken for a failure signature;
 3. assembles a **tidy long** reading table plus **dimension tables** (units,
    vehicle classes, regions, contracts) and a **label table**.
 
 Determinism (ADR-005). One master :class:`numpy.random.SeedSequence` is built from
 ``config.seed`` and **spawned** into independent child sequences — one for fleet
-composition and one per unit per stage (signals / labels / outliers). Independent
+composition and one per unit per stage (drivers / signals / labels / one per
+anomaly injector). Independent
 streams mean a unit's data never depends on how many units preceded it, yet the
 whole dataset is byte-identical for a given config + seed.
 """
@@ -26,16 +27,19 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from ..anomalies import inject_obvious_outliers
+from ..anomalies import ANOMALY_TYPES, apply_anomalies
 from ..config import ForgeConfig
 from ..labels import derive_unit_labels
 from ..signals import generate_unit, signal_names
 from .drivers import drivers_for_unit
 from .fleet import Unit, build_fleet
 
-# Child-stream ordering per unit (kept explicit so the seeding is auditable).
-_STREAMS_PER_UNIT = 4  # drivers, signals, labels, outliers
-_STREAM_DRIVERS, _STREAM_SIGNALS, _STREAM_LABELS, _STREAM_OUTLIERS = 0, 1, 2, 3
+# Child-stream ordering per unit (kept explicit so the seeding is auditable). The
+# first three are the F2 stages; each anomaly injector then gets its own stream so
+# adding/removing a defect type never shifts another stage's seed.
+_STREAM_DRIVERS, _STREAM_SIGNALS, _STREAM_LABELS = 0, 1, 2
+_N_BASE_STREAMS = 3
+_STREAMS_PER_UNIT = _N_BASE_STREAMS + len(ANOMALY_TYPES)
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,7 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
     """Generate the full Tier-1 dataset for ``config``. Deterministic in the seed."""
     config = config.validate()
     region_by_id = {r.id: r for r in config.fleet.regions}
+    anomaly_rates = config.resolved_anomaly_rates()
     n = config.n_steps()
     step_h = config.step_hours()
 
@@ -135,21 +140,23 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         rng_drivers = np.random.default_rng(unit_seqs[base + _STREAM_DRIVERS])
         rng_signals = np.random.default_rng(unit_seqs[base + _STREAM_SIGNALS])
         rng_labels = np.random.default_rng(unit_seqs[base + _STREAM_LABELS])
-        rng_outliers = np.random.default_rng(unit_seqs[base + _STREAM_OUTLIERS])
+        # One seeded stream per anomaly injector (ADR-016), in registry order.
+        rng_anomalies = {
+            atype: np.random.default_rng(unit_seqs[base + _N_BASE_STREAMS + k])
+            for k, atype in enumerate(ANOMALY_TYPES)
+        }
 
         drivers = drivers_for_unit(unit, region, n, step_h, rng_drivers)
         signals = generate_unit(unit.era, drivers, rng_signals)
 
-        # Label from the CLEAN signals (before outliers are injected).
+        # Label failures from the CLEAN signals (before any defect is injected) so a
+        # glitch is never mistaken for a failure signature (ADR-009).
         labels = derive_unit_labels(
             signals, drivers.wear, step_h, config.failure_horizon_h, rng_labels
         )
 
-        # Inject obvious labeled outliers AFTER labelling.
-        outlier_masks = inject_obvious_outliers(signals, config.obvious_outlier_rate, rng_outliers)
-        is_outlier = np.zeros(n, dtype=bool)
-        for mask in outlier_masks.values():
-            is_outlier |= mask
+        # Inject all labeled defects AFTER labelling (ADR-006/-016).
+        anomalies = apply_anomalies(signals, anomaly_rates, rng_anomalies, n)
 
         frame = {"unit_id": unit.unit_id, "t_index": np.arange(n, dtype=np.int32)}
         frame["timestamp_h"] = np.arange(n, dtype=float) * step_h
@@ -158,13 +165,21 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
             frame[name] = values if values is not None else np.full(n, np.nan)
         frame["failure_within_h"] = labels.failure_within_h
         frame["failure_mode"] = labels.failure_mode
-        frame["is_outlier"] = is_outlier
+        frame["is_outlier"] = anomalies.is_outlier
+        frame["anomaly_type"] = anomalies.anomaly_type
+        frame["anomaly_signal"] = anomalies.anomaly_signal
         frames.append(pd.DataFrame(frame))
 
     readings = (
         pd.concat(frames, ignore_index=True)
         if frames
-        else pd.DataFrame(columns=["unit_id", "t_index", "timestamp_h", *cols])
+        else pd.DataFrame(
+            columns=[
+                "unit_id", "t_index", "timestamp_h", *cols,
+                "failure_within_h", "failure_mode", "is_outlier",
+                "anomaly_type", "anomaly_signal",
+            ]
+        )
     )
 
     dims = _dimension_tables(config, units)

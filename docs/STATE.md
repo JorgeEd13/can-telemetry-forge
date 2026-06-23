@@ -4,13 +4,17 @@ Updated: 2026-06-23
 
 ## Current focus
 
-**F2 is done — the MVP (Tier 1) ships.** One command (`forge generate`) produces a
-complete, reproducible dataset: a realistically composed fleet of units emitting
-the 11 J1939 signals over time, gated by CAN capability era, with a multi-mode
-failure label, labeled obvious outliers, and tidy Parquet/CSV/DuckDB tables plus a
-manifest and generated data dictionary. Next is **F3 — richer labeled anomalies**
-(subtle/joint outliers + sensor faults), then F4 (distribution validation) and F5
-(Tier-2/3 diversity).
+**F3 is done — the labeled anomaly/fault layer is complete.** The anomaly layer is
+now a **declarative injector registry** (ADR-016, the same philosophy as the signal
+registry ADR-012): three defect families — obvious outliers, joint/contextual
+outliers, and segment-based sensor faults (stuck/drift/dropout) — each a
+self-describing injector. `forge generate` emits a single open-vocabulary
+`anomaly_type` categorical + `anomaly_signal`, with `is_outlier` kept as a
+value-distortion rollup; every defect is recoverable from labels, era-`NULL` cells
+are never touched, and at most one defect lands per cell. Next is **F4 —
+distribution validation** (a `validate` command comparing generated distributions to
+a license-checked public dataset, fetched at run time, never committed), then **F5**
+(Tier-2 diversity + Tier-3 CAN-frame faults).
 
 ## Done
 
@@ -47,19 +51,34 @@ manifest and generated data dictionary. Next is **F3 — richer labeled anomalie
     106 units, 915,840 readings, all three failure modes present (overheat 34k /
     oil_starve 16k / bearing 12k), EGT NULL for the pre-Modern 57%, era mix
     45 Modern / 44 Mid / 17 Legacy.
+- **F3 — Labeled anomaly & fault injection (declarative registry):**
+  - `anomalies/spec.py` — the `AnomalyInjector` type + the closed-schema /
+    open-vocabulary `anomaly_type` set + the `VALUE_DISTORTION_TYPES` rollup set.
+  - `anomalies/injectors.py` — the registry: `obvious_outlier` (out-of-range spike),
+    `joint_outlier` (in-range but contextually impossible pairs), and segment-based
+    `sensor_stuck` / `sensor_drift` / `sensor_dropout`.
+  - `anomalies/inject.py` — `apply_anomalies` orchestrator: per-signal eligibility
+    (non-NULL, unclaimed) → ≤1 defect/cell; per-row label resolution by injector
+    priority; one seeded stream per injector.
+  - `config.py` — `anomaly_rates` per-type map (merges onto `DEFAULT_ANOMALY_RATES`);
+    `obvious_outlier_rate` retained as a back-compat alias; validated.
+  - `sim/simulate.py` — emits `anomaly_type` + `anomaly_signal` + the `is_outlier`
+    rollup; one child rng per injector per unit.
+  - `io/writers.py` — per-type counts in `manifest.json`; generated dictionary
+    documents the new columns. ADR-016 recorded; DATA_DESIGN §8 / DATA_DICTIONARY
+    updated.
+  - **14 new offline tests (73 total green.)** Verified e2e (20-day/5-min, seed 5):
+    all five families present; `n_outlier_rows` == obvious+joint+stuck+drift
+    (dropout excluded, as documented).
 
 ## Next step (concrete)
 
-**F3 — Anomaly & fault injection (labeled).** Extend the obvious-outlier slice
-(already shipped) with:
-
-1. **Subtle / joint outliers** — each column plausible alone, jointly inconsistent
-   (e.g. high fuel rate with low load; coolant hot with engine off). New label.
-2. **Sensor faults** — stuck channel, single-channel drift, dropout — **distinct
-   from** the structural era-NULLs (a healthy-capable channel going bad). New label
-   column/table.
-3. Tests: each defect type present at its configured rate and fully recoverable
-   from labels; ADR for the labeled-injection contract (extends ADR-006).
+**F4 — Distribution validation.** A `validation/` script + a real `forge validate`
+implementation (currently a stub) that compares the generated distributions against
+a **license-checked** public CAN/OBD/J1939 dataset (histograms, summary stats) and
+emits a self-contained report. Public data is fetched at run time, **never
+committed**, and **CI must not require it** (validation is opt-in). DoD: report
+reproducible from a documented command; license note in README + an ADR.
 
 ## Notes
 

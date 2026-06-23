@@ -17,9 +17,9 @@
 A generator of **synthetic heavy-equipment CAN Bus telemetry** for
 **predictive-maintenance** datasets. It models a *realistically composed* fleet —
 machinery mix, age curve and regional deployment — emitting correlated
-engine/sensor signals over time, injects **labeled** anomalies (obvious outliers
-today; subtle/joint outliers and sensor faults next, see the roadmap), derives a
-**multi-mode failure label**, and writes tidy tables (Parquet / CSV / DuckDB)
+engine/sensor signals over time, injects a registry of **labeled** anomalies
+(obvious + joint/contextual outliers and stuck/drift/dropout sensor faults), derives
+a **multi-mode failure label**, and writes tidy tables (Parquet / CSV / DuckDB)
 ready for any downstream machine-learning or data-quality work.
 
 **The data is the product.** The model that consumes it can be deliberately
@@ -31,12 +31,13 @@ detection) has something real to work on.
 > reproducible dataset: a realistically composed fleet (vehicle-class mix, age curve
 > with a legacy tail, regional deployment) of units emitting the 11 J1939-grounded
 > signals over time — gated by CAN capability era (unsupported signals are `NULL`,
-> never zero) — with a **multi-mode failure label**, **labeled obvious outliers**,
-> and tidy Parquet / CSV / DuckDB tables plus a manifest and a generated data
-> dictionary. Same config + seed → byte-identical output. Still building phase by
-> phase (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): subtle/joint outliers and sensor
-> faults (F3), distribution validation against a public dataset (F4), and Tier-2/3
-> diversity (F5).
+> never zero) — with a **multi-mode failure label**, a **registry of labeled
+> defects** (obvious + joint/contextual outliers and stuck/drift/dropout sensor
+> faults, each recoverable from an `anomaly_type` label), and tidy Parquet / CSV /
+> DuckDB tables plus a manifest and a generated data dictionary. Same config + seed →
+> byte-identical output. Still building phase by phase (see
+> [`docs/ROADMAP.md`](docs/ROADMAP.md)): distribution validation against a public
+> dataset (F4) and Tier-2/3 diversity (F5).
 
 ## Why it's credible (and clean-room)
 
@@ -82,9 +83,8 @@ rationale in [`docs/DECISIONS.md`](docs/DECISIONS.md)):
 
 ## What it generates
 
-The pipeline below is live through the failure label and tidy tables; the
-subtle/joint outliers and sensor faults marked `(F3)` are the next phase (obvious
-labeled outliers already ship):
+The pipeline below is live end to end (CAN-frame fault patterns are the remaining
+Tier-3 item, F5):
 
 ```
 config (fleet, regions, climate, terrain, season, anomaly rates, resolution, seed)
@@ -93,8 +93,8 @@ config (fleet, regions, climate, terrain, season, anomaly rates, resolution, see
         │                  gated by capability era (unsupported SPN → NULL)
         └─► fleet sim      units over time at configurable resolution; thermal /
              │             wear / terrain modifiers per region
-             └─► faults     labeled obvious outliers · subtle/joint + sensor
-                  │         faults (stuck / drift / dropout) (F3)
+             └─► faults     registry of labeled defects → anomaly_type: obvious ·
+                  │         joint/contextual outliers · sensor stuck / drift / dropout
                   └─► label  multi-mode failure_within_h (overheat / oil / bearing)
                        └─► tidy tables → Parquet / CSV / DuckDB + data dictionary
 ```
@@ -112,9 +112,12 @@ forge generate --config configs/fleet.json --seed 42 --format duckdb \
   --days 30 --resolution 5min --out out/
 ```
 
-This writes the tidy `readings` table plus `units` / `vehicle_classes` /
-`regions` / `contracts` dimension tables, a `manifest.json` (provenance + run
-parameters), and a generated `dataset_dictionary.md`. The default config in
+This writes the tidy `readings` table — signals plus the labels
+`failure_within_h` / `failure_mode` and `anomaly_type` / `anomaly_signal` (with an
+`is_outlier` rollup) so every injected defect is recoverable — plus `units` /
+`vehicle_classes` / `regions` / `contracts` dimension tables, a `manifest.json`
+(provenance + run parameters + per-type defect counts), and a generated
+`dataset_dictionary.md`. The default config in
 [`configs/fleet.json`](configs/fleet.json) is a fictional international operator
 whose regions are pinned to **cited public climate-type + road-roughness sources**
 (see [`docs/DATA_DESIGN.md`](docs/DATA_DESIGN.md) §6) — never any private data.
@@ -131,7 +134,8 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
   labeled outliers.
 - **Tier 2:** multiple regions/contracts with climate, terrain and seasonal
   effects, multiple equipment models with distinct failure profiles.
-- **Tier 3:** subtle/joint outliers and sensor/CAN-fault patterns.
+- **Tier 3:** joint/contextual outliers and stuck/drift/dropout sensor faults
+  (shipped in F3); CAN-frame fault patterns remain for F5.
 
 ## Roadmap
 
@@ -140,7 +144,7 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
 | **F0** | Foundations & runnable skeleton (package, CLI, CI) ✅ |
 | **F1** | J1939-grounded signal model + data dictionary ✅ |
 | **F2** | Fleet simulator + Parquet/CSV/DuckDB writers — **Tier 1 ships (MVP)** ✅ |
-| **F3** | Labeled anomaly & sensor-fault injection |
+| **F3** | Labeled anomaly & sensor-fault injection (declarative injector registry) ✅ |
 | **F4** | Distribution validation vs a license-checked public dataset |
 | **F5** | Diversity (Tier 2) + richer faults (Tier 3) |
 

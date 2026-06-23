@@ -290,3 +290,58 @@ complete, runnable fleet, so `--config` is optional.
 **Consequences.** Zero added dependencies; config loads with stdlib; CI stays lean.
 Cost is JSON's lack of comments (mitigated with a `_comment` field in the shipped
 `configs/fleet.json`). README/DATA_DESIGN updated from `.yaml` to `.json`.
+
+---
+
+## ADR-016 — Anomaly injection is a declarative registry; labels are one open-vocabulary categorical
+
+**Context.** F3 implements the labeled-injection contract sketched in ADR-006. Two
+new defect families join the F2 obvious-outlier slice — **joint/contextual
+outliers** (each column in range, the *pair* impossible) and **sensor faults**
+(stuck / drift / dropout, a healthy era-capable channel degrading over a segment,
+distinct from the structural era-`NULL`s of ADR-008). Two design questions had to
+be settled, both with the user, because they shape the **public dataset contract**
+the downstream MLOps vitrine (ADR-001) will consume:
+
+1. *How are the new defects wired in?* Hardcoded functions, or a structure?
+2. *How are they represented in the schema?* Separate boolean columns per family,
+   or one categorical?
+
+The deciding lens for both was the project's stated long-run ambition (same one
+behind ADR-012): this engine should generalise into a **broader rich-data
+generator**, not stay fleet-specific.
+
+**Decision.**
+
+*Injection is a declarative registry.* Each defect mechanism is a registered,
+self-describing `AnomalyInjector` (`anomaly_type` tag + description + a pure,
+seeded `inject` function), exactly mirroring `SignalSpec` (ADR-012). An
+orchestrator (`apply_anomalies`) runs the registry over one unit's signals,
+threading a per-signal **eligibility mask** that starts as "present for this era"
+and shrinks as injectors claim cells — so **at most one defect lands per (signal,
+timestamp) cell**, and era-`NULL` cells are never targeted. Adding a defect (or a
+whole new domain's corruption) is a *local* edit: one injector + one registry
+entry.
+
+*Labels are one categorical, not N booleans.* The schema carries a single
+`anomaly_type` column (`''` / `obvious_outlier` / `joint_outlier` / `sensor_stuck`
+/ `sensor_drift` / `sensor_dropout`) plus `anomaly_signal` (which channel), and
+keeps `is_outlier` as a back-compat **value-distortion rollup**. Rationale: the
+families are **mutually-exclusive injected mechanisms** (a stuck channel is not
+*also* a joint outlier), so booleans would buy a co-occurrence the generator never
+produces while scattering one concept across columns. A single categorical is the
+natural multiclass target/feature downstream, and — decisively for the
+general-engine goal — it is a **closed schema with an open vocabulary**: new
+mechanisms are new *values*, never new *columns* (no breaking schema change per
+defect, in any domain). A row that carries defects on two different signals is
+resolved to one label by **injector priority = registry order**, with the per-cell
+truth still exactly recoverable from the signals + labels.
+
+**Consequences.** The anomaly layer generalises the way the signal layer does;
+defect types grow on a roadmap (Tier-3 CAN faults in F5) without schema churn.
+Rates are per-type config (`anomaly_rates`, with the F2 `obvious_outlier_rate` kept
+as a back-compat alias). `sensor_dropout` is the one family that blanks a value to
+`NULL` rather than distorting it, so it is labeled in `anomaly_type` but **not** in
+the `is_outlier` rollup — documented so the rollup stays meaningful. Sensor faults
+are **segment-based** (contiguous episodes), which is how real transducers fail and
+gives downstream models temporal structure to learn, unlike per-cell salt.

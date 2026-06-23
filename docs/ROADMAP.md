@@ -79,7 +79,7 @@ modes present, EGT NULL for the pre-Modern 57%.
 
 ---
 
-## F3 — Anomaly & fault injection (labeled)  ☐
+## F3 — Anomaly & fault injection (labeled)  ✅
 
 **Objective.** A labeled-defect contract: every injected anomaly/fault is
 recoverable from ground-truth labels.
@@ -90,6 +90,20 @@ injection writes a label column / table.
 
 **DoD.** Tests verify each defect type is present at the configured rate and fully
 recoverable from labels; ADR for the labeled-injection contract.
+
+**Shipped.** Anomaly layer is now a **declarative injector registry** (ADR-016,
+mirroring ADR-012) in `anomalies/`: `spec.py` (the `AnomalyInjector` type + the
+`anomaly_type` vocabulary), `injectors.py` (the three families — `obvious_outlier`,
+`joint_outlier`, and segment-based `sensor_stuck`/`sensor_drift`/`sensor_dropout`),
+`inject.py` (`apply_anomalies` orchestrator: per-signal eligibility shrinks as
+injectors claim cells → ≤1 defect per cell, era-`NULL` never targeted, per-row
+resolution by injector priority). Labels are **one open-vocabulary categorical**
+`anomaly_type` + `anomaly_signal`, with `is_outlier` kept as a value-distortion
+rollup (excludes dropout). Rates are per-type config (`anomaly_rates`;
+`obvious_outlier_rate` kept as a back-compat alias). Writers emit per-type counts in
+`manifest.json` and document the columns in the generated dictionary. **14 new
+offline tests (73 total green.)** Verified e2e: 20-day/5-min run → all five families
+present, `is_outlier` exactly = the four value-distorting types.
 
 ---
 
