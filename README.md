@@ -7,7 +7,7 @@
 <p align="center"><em>Synthetic heavy-equipment telemetry, grounded in the J1939 standard — realistic predictive-maintenance data you can regenerate from a seed.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-F4%20%E2%80%94%20validated%20distributions-success" alt="Status: F4 — validated distributions">
+  <img src="https://img.shields.io/badge/status-F6%20%E2%80%94%20Tier--3%20complete-success" alt="Status: F6 — Tier-3 complete">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/data-100%25%20synthetic-blueviolet" alt="100% synthetic data">
   <img src="https://img.shields.io/badge/grounded-SAE%20J1939%20%2B%20physics-teal" alt="Grounded in SAE J1939 + physics">
@@ -18,28 +18,32 @@ A generator of **synthetic heavy-equipment CAN Bus telemetry** for
 **predictive-maintenance** datasets. It models a *realistically composed* fleet —
 machinery mix, age curve and regional deployment — emitting correlated
 engine/sensor signals over time, injects a registry of **labeled** anomalies
-(obvious + joint/contextual outliers and stuck/drift/dropout sensor faults), derives
-a **multi-mode failure label**, and writes tidy tables (Parquet / CSV / DuckDB)
-ready for any downstream machine-learning or data-quality work.
+(obvious + joint/contextual outliers, stuck/drift/dropout sensor faults, and
+**CAN-frame faults** from a real J1939 frame encoder), derives a **multi-mode
+failure label**, and writes tidy tables (Parquet / CSV / DuckDB) ready for any
+downstream machine-learning or data-quality work.
 
 **The data is the product.** The model that consumes it can be deliberately
 boring — the point is a dataset that is *diverse, statistically credible, and
 fully reproducible*, so the pipeline around it (training, monitoring, drift
-detection) has something real to work on.
+detection) has something real to work on. This generator is built to be the **data
+source for a companion MLOps project** (training → tracking → registry → serving →
+drift monitoring), with `--season` as the knob that demo will shift.
 
 > ✅ **Honest status — the MVP (Tier 1) ships.** One command generates a complete,
 > reproducible dataset: a realistically composed fleet (vehicle-class mix, age curve
 > with a legacy tail, regional deployment) of units emitting the 11 J1939-grounded
 > signals over time — gated by CAN capability era (unsupported signals are `NULL`,
 > never zero) — with a **multi-mode failure label**, a **registry of labeled
-> defects** (obvious + joint/contextual outliers and stuck/drift/dropout sensor
-> faults, each recoverable from an `anomaly_type` label), and tidy Parquet / CSV /
-> DuckDB tables plus a manifest and a generated data dictionary. Same config + seed →
-> byte-identical output, and `forge validate` reports the distributions as plausible
-> (in-spec + drift-free offline, with an opt-in CC-BY real-data overlap). Still
-> building phase by phase (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2
-> diversity — more regions, equipment models, and seasons — shipped (F5); Tier-3
-> CAN-frame faults remain (F6).
+> defects** (obvious + joint/contextual outliers, stuck/drift/dropout sensor faults,
+> and Tier-3 **CAN-frame faults**, each recoverable from an `anomaly_type` label), and
+> tidy Parquet / CSV / DuckDB tables plus a manifest and a generated data dictionary.
+> Same config + seed → byte-identical output, and `forge validate` reports the
+> distributions as plausible (in-spec + drift-free offline, with an opt-in CC-BY
+> real-data overlap). **The planned roadmap (F0–F6) is complete** (see
+> [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2 diversity (regions, equipment models,
+> seasons) shipped in F5; Tier-3 CAN-frame faults + a J1939 frame-level encoder
+> shipped in F6.
 
 ## Why it's credible (and clean-room)
 
@@ -83,11 +87,15 @@ rationale in [`docs/DECISIONS.md`](docs/DECISIONS.md)):
 - **Environment that wears the machine.** Per-region **thermal + wear + terrain /
   road-quality** modifiers (grounded in public data) shift signal baselines *and*
   accelerate failure hazards — the seam a future drift demo shifts.
+- **Real J1939 frames under the hood.** Each bus signal has its true byte/bit frame
+  layout; a frame-level encoder/decoder lets the Tier-3 **CAN-frame faults** (byte
+  corruption, stale re-sends, error/not-available codes, truncated DLCs) be injected
+  at the byte layer and **decoded back** — exactly what a receiver sees — with the raw
+  frames optionally emitted as a `can_frames` artifact.
 
 ## What it generates
 
-The pipeline below is live end to end (CAN-frame fault patterns are the remaining
-Tier-3 item, F5):
+The pipeline below is live end to end:
 
 ```
 config (fleet, regions, climate, terrain, season, anomaly rates, resolution, seed)
@@ -97,7 +105,8 @@ config (fleet, regions, climate, terrain, season, anomaly rates, resolution, see
         └─► fleet sim      units over time at configurable resolution; thermal /
              │             wear / terrain modifiers per region
              └─► faults     registry of labeled defects → anomaly_type: obvious ·
-                  │         joint/contextual outliers · sensor stuck / drift / dropout
+                  │         joint/contextual outliers · sensor stuck / drift / dropout ·
+                  │         CAN-frame corrupt / stale / error-indicator / truncated
                   └─► label  multi-mode failure_within_h (overheat / oil / bearing)
                        └─► tidy tables → Parquet / CSV / DuckDB + data dictionary
 ```
@@ -116,6 +125,9 @@ forge generate --config configs/fleet.json --seed 42 --format duckdb \
 
 # Tier-2: apply a seasonal anomaly (the knob a future drift demo shifts):
 forge generate --season heatwave --out out/
+
+# Tier-3: also emit the byte-level corrupted J1939 frames as a side table:
+forge generate --emit-raw-frames --out out/
 ```
 
 This writes the tidy `readings` table — signals plus the labels
@@ -123,7 +135,9 @@ This writes the tidy `readings` table — signals plus the labels
 `is_outlier` rollup) so every injected defect is recoverable — plus `units` /
 `vehicle_classes` / `equipment_models` / `regions` / `contracts` dimension tables, a
 `manifest.json` (provenance + run parameters + per-type defect counts + the run's
-season), and a generated `dataset_dictionary.md`. The default config in
+season), and a generated `dataset_dictionary.md`. With `--emit-raw-frames` it also
+writes an opt-in `can_frames` table of the byte-level corrupted J1939 frames behind
+each CAN-frame fault. The default config in
 [`configs/fleet.json`](configs/fleet.json) is a fictional international operator
 whose regions are pinned to **cited public climate-type + road-roughness sources**
 (see [`docs/DATA_DESIGN.md`](docs/DATA_DESIGN.md) §6) — never any private data.
@@ -181,9 +195,10 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
   (per-mode hazard multipliers, baseline offsets, optional capability floor), and
   configurable **seasons** (`heatwave` / `cold_snap` / `wet_season`) — the knob a
   future drift demo shifts.
-- **Tier 3:** joint/contextual outliers and stuck/drift/dropout sensor faults
-  (shipped in F3); **CAN-frame** fault patterns remain for F6 (they need the
-  frame-level encoder).
+- **Tier 3 (shipped):** joint/contextual outliers and stuck/drift/dropout sensor
+  faults (F3); plus **CAN-frame faults** — byte corruption, stale re-sends,
+  J1939 error/not-available codes, and truncated DLCs — injected at the byte layer by
+  a real frame-level encoder/decoder and decoded back into the table (F6).
 
 ## Roadmap
 
@@ -195,7 +210,7 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
 | **F3** | Labeled anomaly & sensor-fault injection (declarative injector registry) ✅ |
 | **F4** | Distribution validation vs a license-checked public dataset (offline in-spec/golden + opt-in CC-BY VED overlap) ✅ |
 | **F5** | Diversity (Tier 2): more regions + equipment models + seasons ✅ |
-| **F6** | CAN-frame faults (Tier 3) + the frame-level encoder they need |
+| **F6** | CAN-frame faults (Tier 3) + the frame-level encoder they need ✅ |
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for objectives and definitions of done,
 and [`docs/DECISIONS.md`](docs/DECISIONS.md) for the design rationale (ADRs).

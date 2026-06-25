@@ -20,6 +20,10 @@ from can_telemetry_forge.anomalies import (
     apply_anomalies,
 )
 from can_telemetry_forge.anomalies.spec import (
+    CAN_FRAME_CORRUPT,
+    CAN_FRAME_ERROR_INDICATOR,
+    CAN_FRAME_STALE,
+    CAN_FRAME_TRUNCATED,
     JOINT_OUTLIER,
     OBVIOUS_OUTLIER,
     SENSOR_DROPOUT,
@@ -57,6 +61,11 @@ def _all_on_rates() -> dict[str, float]:
         SENSOR_STUCK: 0.002,
         SENSOR_DRIFT: 0.002,
         SENSOR_DROPOUT: 0.002,
+        # CAN-frame faults (F6) — cranked so each family fires in the test window.
+        CAN_FRAME_CORRUPT: 0.02,
+        CAN_FRAME_STALE: 0.002,
+        CAN_FRAME_ERROR_INDICATOR: 0.02,
+        CAN_FRAME_TRUNCATED: 0.02,
     }
 
 
@@ -208,9 +217,16 @@ def test_simulate_emits_anomaly_columns_and_all_types_present() -> None:
         assert col in ds.readings.columns
     present = set(ds.readings["anomaly_type"].unique()) - {NO_ANOMALY}
     assert set(ANOMALY_TYPES) <= present, f"missing in dataset: {set(ANOMALY_TYPES) - present}"
-    # The rollup excludes dropout; cross-check against the categorical.
-    distort = ds.readings["anomaly_type"].isin(list(VALUE_DISTORTION_TYPES))
-    assert (ds.readings["is_outlier"] == distort).all()
+    # A row whose *winning* label is value-distorting must be flagged `is_outlier`
+    # (one direction always holds). The reverse is **not** an equality: a row can win
+    # a non-distorting categorical (e.g. `sensor_dropout`, higher injector priority)
+    # while a value-distorting frame fault hit a *different* signal on the same row —
+    # `is_outlier` is a per-row rollup over all distorting cells, by design.
+    distort_label = ds.readings["anomaly_type"].isin(list(VALUE_DISTORTION_TYPES))
+    assert ds.readings.loc[distort_label, "is_outlier"].all()
+    # And a clean row (no defect anywhere) is never flagged.
+    clean = ds.readings["anomaly_type"] == NO_ANOMALY
+    assert not ds.readings.loc[clean, "is_outlier"].any()
 
 
 def test_simulate_dropout_rows_are_null_in_their_signal() -> None:

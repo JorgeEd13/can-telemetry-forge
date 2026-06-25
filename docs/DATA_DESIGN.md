@@ -229,7 +229,7 @@ on the ground truth.
 
 ---
 
-## 8. Anomalies & faults (labeled — F3, shipped)
+## 8. Anomalies & faults (labeled — F3 + F6, shipped)
 
 Every injected defect carries ground-truth labels so downstream QA/anomaly work is
 **verifiable** (recover the injection from the labels). The injectors form a
@@ -239,7 +239,8 @@ most one defect lands per (signal, timestamp) cell and era-`NULL` cells are neve
 targeted. Labels surface as **one open-vocabulary categorical** (`anomaly_type`) +
 `anomaly_signal`, with `is_outlier` kept as a value-distortion rollup.
 
-Shipped families (each a configurable `anomaly_rates[...]` knob):
+**Value-domain & sensor families (F3)** — each a configurable `anomaly_rates[...]`
+knob:
 
 - **`obvious_outlier`** (was the F2 slice): out-of-range spike, impossible on its
   own — the easy univariate case.
@@ -253,9 +254,30 @@ Shipped families (each a configurable `anomaly_rates[...]` knob):
   - **`sensor_drift`** — a slow accumulating bias over the segment.
   - **`sensor_dropout`** — the channel goes `NULL` over the segment.
 
-**Still Tier 3 (F5):** CAN-frame faults (malformed / implausible frame patterns)
-land once a frame-level encoder exists (the inert PGNs of ADR-013 are the seam).
-Adding them is a new registry entry + a new `anomaly_type` value — no schema change.
+**CAN-frame faults (Tier 3, F6 — shipped, ADR-019).** The corruption class that only
+exists once a signal is encoded as an **actual J1939 frame**. ADR-013 recorded each
+signal's PGN inert; F6 completes it with a `FrameLayout` (byte/bit placement +
+scaling/offset) and a **frame-level encoder/decoder** (`signals/frames.py`). Each
+fault encodes the unit's value to its frame, corrupts the **bytes**, and **decodes
+back** into the engineering column — exactly what a real receiver would observe — so
+the dataset stays decoded (no schema change) and the byte-level truth is optionally
+emitted to a `can_frames` side table (`--emit-raw-frames` / `emit_raw_frames`). Four
+new `anomaly_type` *values* (ADR-016 — no new column):
+
+- **`can_frame_corrupt`** — a payload byte flips → the field decodes to an
+  implausible value (value-distorting).
+- **`can_frame_stale`** — a frame is re-sent over a segment → the decoded value
+  freezes; a **transport** fault, distinct from `sensor_stuck` (value-distorting).
+- **`can_frame_error_indicator`** — the field carries the J1939 error / "not
+  available" code → decodes to `NULL`.
+- **`can_frame_truncated`** — a short DLC drops the field's bytes → decodes to `NULL`
+  (distinct from era-NULL and `sensor_dropout`).
+
+J1939 conventions modeled: little-endian fields, the all-ones "not available" code
+and the top-of-range error indicator both decode to `NULL`, frames are ≤8 bytes with
+`0xFF` idle fill. The codec **round-trips** every documented signal within one
+quantum (tested); the value generators still don't read the layout (the ADR-013
+inert-PGN invariant holds, tested).
 
 ---
 

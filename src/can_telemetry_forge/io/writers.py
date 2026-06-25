@@ -30,12 +30,16 @@ from ..sim.simulate import SimulatedDataset
 
 FORMATS: tuple[str, ...] = ("parquet", "csv", "duckdb")
 
-# Output table name → attribute on SimulatedDataset.
+# Output table name → attribute on SimulatedDataset. ``can_frames`` (F6) is appended
+# only when ``config.emit_raw_frames`` is set (the raw frames are an opt-in artifact).
 _TABLES = ("readings", "units", "vehicle_classes", "equipment_models", "regions", "contracts")
 
 
 def _tables(ds: SimulatedDataset) -> dict[str, pd.DataFrame]:
-    return {name: getattr(ds, name) for name in _TABLES}
+    tables = {name: getattr(ds, name) for name in _TABLES}
+    if ds.config.emit_raw_frames:
+        tables["can_frames"] = ds.can_frames
+    return tables
 
 
 def _write_parquet(tables: dict[str, pd.DataFrame], out: Path) -> None:
@@ -100,6 +104,9 @@ def _manifest(ds: SimulatedDataset, fmt: str) -> dict:
         "n_failure_rows": int(ds.readings["failure_within_h"].sum()) if not ds.readings.empty else 0,
         "n_outlier_rows": int(ds.readings["is_outlier"].sum()) if not ds.readings.empty else 0,
         "n_anomaly_rows_by_type": _anomaly_type_counts(ds),
+        # F6: the raw-frame side artifact and how many byte-level frames it carries.
+        "emit_raw_frames": cfg.emit_raw_frames,
+        "n_can_frames": int(ds.can_frames.shape[0]),
     }
 
 
@@ -146,6 +153,20 @@ def _dataset_dictionary_md(ds: SimulatedDataset) -> str:
         "- `sensor_stuck` — a channel frozen at one value over a contiguous segment.",
         "- `sensor_drift` — a slow accumulating bias on one channel over a segment.",
         "- `sensor_dropout` — a channel goes `NULL` over a segment (not era-gating).",
+        "- `can_frame_corrupt` — a J1939 payload **byte flips**; the field decodes to "
+        "an implausible value (Tier-3 frame fault, F6).",
+        "- `can_frame_stale` — a frame is **re-sent** over a segment; the decoded value "
+        "freezes at the transport layer (distinct from `sensor_stuck`).",
+        "- `can_frame_error_indicator` — the field carries the J1939 **error / "
+        "not-available** code → decodes to `NULL`.",
+        "- `can_frame_truncated` — a **short DLC** drops the field's bytes → the field "
+        "decodes to `NULL` (distinct from era-NULL and `sensor_dropout`).",
+        "",
+        "The four `can_frame_*` defects are **transport-layer** corruptions of the "
+        "encoded J1939 frame, decoded back into the table exactly as a receiver would "
+        "see them (ADR-019). With `emit_raw_frames` on, the byte-level corrupted frames "
+        "are written to the `can_frames` table (else absent — the decoded readings are "
+        "the product).",
         "",
         "## Dimension tables",
         "",
@@ -158,6 +179,9 @@ def _dataset_dictionary_md(ds: SimulatedDataset) -> str:
         "- `regions` — deployment geographies with public-grounded climate/terrain "
         "(see the `source` column).",
         "- `contracts` — jobs per region.",
+        "- `can_frames` — **opt-in** (`emit_raw_frames`): the byte-level corrupted "
+        "J1939 frames behind each `can_frame_*` defect — `unit_id`, `t_index`, "
+        "`timestamp_h`, `signal`, `anomaly_type`, and the frame as hex (`frame_hex`).",
         "",
         "The run's **season** (Tier-2 — a baseline / heatwave / cold-snap / wet-season "
         "modifier, the knob a future drift demo shifts) is recorded in `manifest.json` "

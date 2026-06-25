@@ -56,6 +56,21 @@ class AnomalyLabels:
     is_outlier: np.ndarray
     hits: list[InjectionHit]
 
+    def frame_records(self) -> list[tuple[int, str, str, str]]:
+        """Per-cell corrupted-frame records for the raw-frame side artifact (F6).
+
+        Returns ``(t_index, signal, anomaly_type, frame_hex)`` tuples — one per cell a
+        CAN-frame injector corrupted (the only injectors that populate ``hit.frames``).
+        Empty when no frame fault fired, so the artifact is naturally opt-in/empty.
+        """
+        records: list[tuple[int, str, str, str]] = []
+        for hit in self.hits:
+            if hit.frames is None:
+                continue
+            for t_index, frame_hex in hit.frames.items():
+                records.append((int(t_index), hit.signal, hit.anomaly_type, frame_hex))
+        return records
+
 
 def apply_anomalies(
     signals: dict[str, np.ndarray | None],
@@ -128,12 +143,18 @@ def _resolve_row_labels(hits: list[InjectionHit], n: int) -> AnomalyLabels:
 # Default per-type rates. Outliers are per-eligible-cell (rare points); sensor
 # faults are per-step *segment-start* probabilities (each spawns a ~40-step
 # episode), so their cell coverage is much higher than the raw number suggests.
+# CAN-frame faults (F6) are rarer still: per-cell point faults (corrupt / error /
+# truncated) and a per-step segment-start probability for the stale (held) frame.
 DEFAULT_ANOMALY_RATES: dict[str, float] = {
     "obvious_outlier": 0.002,
     "joint_outlier": 0.02,     # of the rows that match a contradiction context
     "sensor_stuck": 2.0e-5,
     "sensor_drift": 2.0e-5,
     "sensor_dropout": 2.0e-5,
+    "can_frame_corrupt": 5.0e-4,
+    "can_frame_stale": 1.0e-5,        # per-step segment start (held-frame episode)
+    "can_frame_error_indicator": 2.0e-4,
+    "can_frame_truncated": 2.0e-4,
 }
 
 

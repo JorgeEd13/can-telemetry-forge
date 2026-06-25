@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .spec import (
     Era,
+    FrameLayout,
     SignalSpec,
     TIER1_SIGNALS,
     SIGNALS_BY_NAME,
@@ -23,9 +24,17 @@ from .eras import (
     gated_signal_names,
 )
 from .generators import DriverSeries, generate_unit
+from .frames import (
+    decode_signal_frame,
+    encode_signal_frame,
+    frame_to_hex,
+    raw_to_value,
+    value_to_raw,
+)
 
 __all__ = [
     "Era",
+    "FrameLayout",
     "SignalSpec",
     "TIER1_SIGNALS",
     "SIGNALS_BY_NAME",
@@ -37,4 +46,9 @@ __all__ = [
     "gated_signal_names",
     "DriverSeries",
     "generate_unit",
+    "encode_signal_frame",
+    "decode_signal_frame",
+    "value_to_raw",
+    "raw_to_value",
+    "frame_to_hex",
 ]

@@ -21,6 +21,7 @@ from .injectors import INJECTOR_BY_TYPE, INJECTORS
 from .outliers import inject_obvious_outliers
 from .spec import (
     ANOMALY_TYPES,
+    CAN_FRAME_TYPES,
     NO_ANOMALY,
     VALUE_DISTORTION_TYPES,
     AnomalyInjector,
@@ -36,6 +37,7 @@ __all__ = [
     "AnomalyInjector",
     "InjectionHit",
     "ANOMALY_TYPES",
+    "CAN_FRAME_TYPES",
     "NO_ANOMALY",
     "VALUE_DISTORTION_TYPES",
     "inject_obvious_outliers",
