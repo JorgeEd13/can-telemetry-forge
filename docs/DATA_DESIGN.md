@@ -362,3 +362,26 @@ These are settled; remaining specifics get committed during F1/F2.
   CC-BY 4.0), opt-in `forge validate --dataset ved`, fetched at run time, never
   committed; offline `in_spec`/`golden` adapters always run.
 - Finer per-region climate normals / per-model SPN whitelists (Tier 2 — F5).
+
+### Considered & declined as a validation reference
+
+- **"Logistics Vehicle Maintenance History" (Kaggle, *datasetengineer*, 250k rows)** —
+  evaluated as a second F4 reference adapter and **declined**, for three reasons that
+  also document what a good reference *must* be (ADR-017): (1) **wrong granularity** —
+  it is **one row per vehicle = a maintenance/health snapshot** (`Failure_History` is a
+  *count*, `Days_Since_Last_Maintenance`, `Last_Maintenance_Date`…), not the
+  per-timestamp **telemetry time-series** this generator emits, so there is no
+  instantaneous-signal distribution to take a histogram-intersection overlap against;
+  (2) **thin/coarse shared channels** — it has no engine RPM, oil pressure, engine
+  load %, fuel rate, EGT or boost; only aggregate `Engine_Temperature`,
+  `Fuel_Consumption`, `Vibration_Levels` and an `Oil_Quality` *index* (not pressure),
+  so it would be a weaker "vs reality" check than VED's real instantaneous OBD-II
+  channels; (3) **provenance/license** — it reads as a manufactured, ML-ready set
+  (engineered indices PCR/UIR/TPI/MBF/ADS/OHI…, a non-IID Dirichlet federated
+  partition, predefined splits) with **no explicit license stated**; a synthetic or
+  unlicensed reference fails the F4 bar (validating synthetic-vs-synthetic proves
+  nothing about real-world plausibility). It is, however, a plausible **external
+  benchmark for the future MLOps showcase** (binary `Maintenance_Required` +
+  multiclass `Maintenance_Severity` targets, ready splits) — a different role, with a
+  looser constraint than this clean-room generator's, and still pending its own
+  license check.
