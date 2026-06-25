@@ -141,14 +141,48 @@ REST endpoint (legacy key, `requests` only) gave histogram overlap **0.48 engine
 
 ---
 
-## F5 — Diversity (Tier 2) & richer faults (Tier 3)  ☐
+## F5 — Diversity (Tier 2)  ✅
 
-**Objective.** Deepen realism: regional/climate/seasonal diversity and the
-trickier fault patterns that set up a future drift demo.
+**Objective.** Deepen realism along the Tier-2 axes: regional/climate diversity,
+distinct equipment models with their own failure profiles, and configurable
+seasonality (the knob a future drift demo shifts).
 
-**How.** Regions/contracts with climate baselines; multiple equipment models with
-distinct failure profiles; seasonal effects (Tier 2). Subtle joint outliers and
-CAN-fault patterns (Tier 3). All configurable, all labeled, all seeded.
+**How.** Two more public-grounded regions/contracts; a catalog of **equipment
+models** (per-mode hazard multipliers + baseline signature offsets + optional
+capability-era floor) assigned per unit; named **seasons** (ambient delta + wear +
+per-mode hazard multipliers) selectable by config / `--season`. All as declarative
+catalog entries resolving to multipliers/offsets — **no new readings-schema
+columns** (ADR-018). Labels stay derived in one place (the model × season hazard
+multiplier composes into `derive_unit_labels`).
 
-**DoD.** Config-driven multi-region/multi-model generation tested; richer faults
-labeled and tested; DATA_DESIGN updated to reflect what shipped.
+**DoD.** Config-driven multi-region/multi-model generation tested; the seasonal
+modifier tested end-to-end; DATA_DESIGN updated to reflect what shipped.
+
+**Shipped.** `config.py` — `EquipmentModel` + `Season` dataclasses, a catalog (6
+regions, 6 contracts, 6 equipment models, 4 seasons), validation, and JSON/preset
+resolution (`resolve_season`). `sim/fleet.py` assigns a model per unit (class-only
+fallback) honouring per-model `build_year_min`. `sim/drivers.py` applies the
+season's ambient delta + wear multiplier and threads model offsets into the signal
+layer; `signals/generators.py` adds the offsets inside the J1939 clamp.
+`labels/failure.py` takes a per-mode `hazard_mult`; `sim/simulate.py` composes
+model × season (`_merge_hazard_mults`), emits an `equipment_models` dimension table
++ `units.model_id`. `io/writers.py` writes the new table and echoes `season` in the
+manifest. `--season` on `forge generate`. ADR-018 recorded; DATA_DESIGN §6/§9
+updated. **12 new offline tests (102 total green.)** Default fleet → 134 units;
+heatwave runs produce more failures than baseline, end-to-end.
+
+---
+
+## F6 — CAN-frame faults (Tier 3) & a frame-level encoder  ☐
+
+**Objective.** The trickier Tier-3 fault patterns: malformed / implausible **CAN
+frames** (bad byte/bit layout, out-of-spec PGN payloads), the corruption class that
+only exists once signals are encoded as actual J1939 frames.
+
+**How.** Build a frame-level encoder (per-PGN byte/bit layout, scaling/offset) over
+the inert PGNs recorded since ADR-013 — that is the seam. Then add CAN-frame fault
+injectors as new registry entries (ADR-016): each is a new `anomaly_type` *value*,
+no schema change. All configurable, labeled, seeded.
+
+**DoD.** Frame encoder round-trips the documented signals; CAN-frame faults labeled
+and recoverable from the labels; tested; DATA_DESIGN §8 updated.

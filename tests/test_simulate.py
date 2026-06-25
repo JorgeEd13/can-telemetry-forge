@@ -14,11 +14,14 @@ import pandas as pd
 import pytest
 
 from can_telemetry_forge.anomalies import inject_obvious_outliers
-from can_telemetry_forge.config import config_from_dict, default_config
+from can_telemetry_forge.config import SEASONS, config_from_dict, default_config
 from can_telemetry_forge.labels import FAILURE_MODES, derive_unit_labels
 from can_telemetry_forge.signals import Era, era_for_model_year, generate_unit, signal_names
 from can_telemetry_forge.sim import build_fleet, simulate
 from can_telemetry_forge.sim.drivers import drivers_for_unit
+
+# The neutral season — the default for tests that don't exercise Tier-2 seasonality.
+_BASELINE = SEASONS["baseline"]
 
 
 def small_config(**over):
@@ -59,7 +62,7 @@ def test_wear_is_monotonic_nondecreasing() -> None:
     cfg = small_config()
     region = cfg.fleet.regions[0]
     units = build_fleet(cfg.fleet, np.random.default_rng(0))
-    d = drivers_for_unit(units[0], region, cfg.n_steps(), cfg.step_hours(), np.random.default_rng(0))
+    d = drivers_for_unit(units[0], region, _BASELINE, cfg.n_steps(), cfg.step_hours(), np.random.default_rng(0))
     assert np.all(np.diff(d.wear) >= -1e-12)
     assert np.all((d.wear >= 0.0) & (d.wear <= 1.0))
 
@@ -72,8 +75,8 @@ def test_harsher_region_drives_more_wear() -> None:
     unit = min(units, key=lambda u: u.runtime_start_h)
     n, step = cfg.n_steps(), cfg.step_hours()
     regions = {r.id: r for r in cfg.fleet.regions}
-    harsh = drivers_for_unit(unit, regions["arid_highland"], n, step, np.random.default_rng(1))
-    mild = drivers_for_unit(unit, regions["temperate_lowland"], n, step, np.random.default_rng(1))
+    harsh = drivers_for_unit(unit, regions["arid_highland"], _BASELINE, n, step, np.random.default_rng(1))
+    mild = drivers_for_unit(unit, regions["temperate_lowland"], _BASELINE, n, step, np.random.default_rng(1))
     assert harsh.wear.mean() > mild.wear.mean()
 
 
@@ -89,7 +92,7 @@ def _failure_fraction(wear_level: float, seed_count: int = 200) -> float:
     n, step = cfg.n_steps(), cfg.step_hours()
     fails = 0
     for s in range(seed_count):
-        drivers = drivers_for_unit(unit, region, n, step, np.random.default_rng(s))
+        drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(s))
         signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(s))
         wear = np.full(n, wear_level)
         labels = derive_unit_labels(signals, wear, step, cfg.failure_horizon_h, np.random.default_rng(s))
@@ -107,7 +110,7 @@ def test_failure_mode_is_valid_and_horizon_marked() -> None:
     region = cfg.fleet.regions[0]
     unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
     n, step = cfg.n_steps(), cfg.step_hours()
-    drivers = drivers_for_unit(unit, region, n, step, np.random.default_rng(3))
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(3))
     signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(3))
     labels = derive_unit_labels(signals, np.full(n, 0.99), step, cfg.failure_horizon_h, np.random.default_rng(3))
     if labels.event_index is not None:
@@ -124,7 +127,7 @@ def test_legacy_unit_cannot_fail_on_modern_only_mode() -> None:
     region = cfg.fleet.regions[0]
     unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
     n, step = cfg.n_steps(), cfg.step_hours()
-    drivers = drivers_for_unit(unit, region, n, step, np.random.default_rng(0))
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(0))
     signals = generate_unit(Era.LEGACY, drivers, np.random.default_rng(0))
     modes_seen = set()
     for s in range(100):
@@ -142,7 +145,7 @@ def test_outliers_are_present_and_recoverable() -> None:
     region = cfg.fleet.regions[0]
     unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
     n, step = cfg.n_steps(), cfg.step_hours()
-    drivers = drivers_for_unit(unit, region, n, step, np.random.default_rng(0))
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(0))
     signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(0))
     masks = inject_obvious_outliers(signals, rate=0.05, rng=np.random.default_rng(0))
     assert masks, "expected some injectable signals"
@@ -159,7 +162,7 @@ def test_zero_rate_injects_nothing() -> None:
     cfg = small_config()
     unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
     n, step = cfg.n_steps(), cfg.step_hours()
-    drivers = drivers_for_unit(unit, cfg.fleet.regions[0], n, step, np.random.default_rng(0))
+    drivers = drivers_for_unit(unit, cfg.fleet.regions[0], _BASELINE, n, step, np.random.default_rng(0))
     signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(0))
     assert inject_obvious_outliers(signals, rate=0.0, rng=np.random.default_rng(0)) == {}
 

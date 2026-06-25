@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..config import Region
+from ..config import Region, Season
 from ..signals import DriverSeries
 from .fleet import Unit
 
@@ -42,11 +42,15 @@ def _time_hours(n: int, step_hours: float) -> np.ndarray:
     return np.arange(n, dtype=float) * step_hours
 
 
-def _ambient_series(region: Region, t_h: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-    """Ambient °C: region mean + slow seasonal + diurnal sinusoids (no clamp).
+def _ambient_series(
+    region: Region, season: Season, t_h: np.ndarray, rng: np.random.Generator
+) -> np.ndarray:
+    """Ambient °C: region mean + slow seasonal + diurnal sinusoids + season anomaly.
 
     The seasonal phase is randomised per unit (seeded) so units don't move in
-    lockstep; the diurnal cycle is a 24-hour sinusoid.
+    lockstep; the diurnal cycle is a 24-hour sinusoid. The configured
+    :class:`Season` adds a constant ``ambient_delta_c`` anomaly on top (Tier-2,
+    F5) — the knob a future drift demo shifts.
     """
     seasonal_phase = rng.uniform(0.0, 2.0 * np.pi)
     days = t_h / 24.0
@@ -56,7 +60,7 @@ def _ambient_series(region: Region, t_h: np.ndarray, rng: np.random.Generator) -
         * region.ambient_c_amplitude
         * np.sin(2.0 * np.pi * (t_h % 24.0) / 24.0)
     )
-    return region.ambient_c_mean + seasonal + diurnal
+    return region.ambient_c_mean + seasonal + diurnal + season.ambient_delta_c
 
 
 def _duty_series(unit: Unit, t_h: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -68,32 +72,42 @@ def _duty_series(unit: Unit, t_h: np.ndarray, rng: np.random.Generator) -> np.nd
     return np.clip(duty, 0.0, 1.0)
 
 
-def _wear_series(unit: Unit, region: Region, t_h: np.ndarray) -> np.ndarray:
+def _wear_series(
+    unit: Unit, region: Region, season: Season, t_h: np.ndarray
+) -> np.ndarray:
     """Monotonic accumulated wear in [0, 1] over the window.
 
     Starts from the wear implied by the unit's runtime at window start and climbs
-    with elapsed runtime, scaled by class wear-rate and region hazard modifier.
+    with elapsed runtime, scaled by class wear-rate, region hazard modifier, and
+    the season's ``wear_mult`` (Tier-2, F5 — a wet/hot season degrades faster).
     Deterministic (no noise): wear is a state, not a measurement.
     """
-    rate = unit.wear_rate * region.wear_modifier
+    rate = unit.wear_rate * region.wear_modifier * season.wear_mult
     accumulated_h = unit.runtime_start_h + t_h  # upper bound (assumes mostly running)
     wear = rate * accumulated_h / _WEAR_FULL_SCALE_H
     return np.clip(wear, 0.0, 1.0)
 
 
 def drivers_for_unit(
-    unit: Unit, region: Region, n: int, step_hours: float, rng: np.random.Generator
+    unit: Unit,
+    region: Region,
+    season: Season,
+    n: int,
+    step_hours: float,
+    rng: np.random.Generator,
 ) -> DriverSeries:
     """Build the F1 :class:`DriverSeries` for one unit over the window.
 
-    ``region`` must be the unit's region. ``rng`` is the unit's own seeded child
-    generator (spawned in :mod:`.simulate`), so per-unit randomness is independent
-    yet reproducible.
+    ``region`` must be the unit's region; ``season`` is the run's configured
+    seasonal modifier (Tier-2). ``rng`` is the unit's own seeded child generator
+    (spawned in :mod:`.simulate`), so per-unit randomness is independent yet
+    reproducible. The unit's model baseline offsets travel into the signal layer
+    via the returned series.
     """
     t_h = _time_hours(n, step_hours)
-    ambient = _ambient_series(region, t_h, rng)
+    ambient = _ambient_series(region, season, t_h, rng)
     duty = _duty_series(unit, t_h, rng)
-    wear = _wear_series(unit, region, t_h)
+    wear = _wear_series(unit, region, season, t_h)
 
     return DriverSeries(
         n=n,
@@ -105,6 +119,9 @@ def drivers_for_unit(
         runtime_start_h=unit.runtime_start_h,
         age_days=unit.age_days,
         step_hours=step_hours,
+        coolant_offset_c=unit.coolant_offset_c,
+        oil_offset_kpa=unit.oil_offset_kpa,
+        vibration_offset_mms=unit.vibration_offset_mms,
     )
 
 

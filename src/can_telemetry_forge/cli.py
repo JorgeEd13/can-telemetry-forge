@@ -80,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("1s", "1min", "5min"),
         help="time resolution (overrides config)",
     )
+    generate.add_argument(
+        "--season",
+        choices=("baseline", "heatwave", "cold_snap", "wet_season"),
+        help=(
+            "Tier-2 seasonal modifier (overrides config; default baseline). The knob "
+            "a future drift demo shifts — moves ambient + tilts failure hazards."
+        ),
+    )
 
     # `forge validate` — distribution validation (F4, opt-in).
     validate = subparsers.add_parser(
@@ -120,7 +128,7 @@ def _run_generate(args: argparse.Namespace) -> int:
     """Execute ``forge generate`` over the library. Returns an exit code."""
     from dataclasses import replace
 
-    from .config import load_config
+    from .config import load_config, resolve_season
     from .io import write_dataset
     from .sim import simulate
 
@@ -132,6 +140,8 @@ def _run_generate(args: argparse.Namespace) -> int:
         overrides["days"] = args.days
     if args.resolution is not None:
         overrides["resolution"] = args.resolution
+    if args.season is not None:
+        overrides["season"] = resolve_season(args.season)
     if overrides:
         config = replace(config, **overrides).validate()
 

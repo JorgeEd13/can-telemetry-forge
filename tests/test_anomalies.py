@@ -26,10 +26,12 @@ from can_telemetry_forge.anomalies.spec import (
     SENSOR_DRIFT,
     SENSOR_STUCK,
 )
-from can_telemetry_forge.config import config_from_dict, default_config
+from can_telemetry_forge.config import SEASONS, config_from_dict, default_config
 from can_telemetry_forge.sim import build_fleet, simulate
 from can_telemetry_forge.sim.drivers import drivers_for_unit
 from can_telemetry_forge.signals import Era, generate_unit, get_spec
+
+_BASELINE = SEASONS["baseline"]
 
 
 def _modern_unit_signals(days: int = 8, resolution: str = "5min", seed: int = 0):
@@ -38,7 +40,7 @@ def _modern_unit_signals(days: int = 8, resolution: str = "5min", seed: int = 0)
     region = cfg.fleet.regions[0]
     unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
     n, step = cfg.n_steps(), cfg.step_hours()
-    drivers = drivers_for_unit(unit, region, n, step, np.random.default_rng(0))
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(0))
     signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(0))
     return signals, n
 
@@ -151,7 +153,7 @@ def test_era_gated_cells_are_never_targeted() -> None:
     region = cfg.fleet.regions[0]
     unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
     n, step = cfg.n_steps(), cfg.step_hours()
-    drivers = drivers_for_unit(unit, region, n, step, np.random.default_rng(0))
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(0))
     signals = generate_unit(Era.LEGACY, drivers, np.random.default_rng(0))
     gated = [name for name, arr in signals.items() if arr is None]
     assert gated, "expected some era-gated signals for a Legacy unit"

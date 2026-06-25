@@ -31,7 +31,7 @@ from ..sim.simulate import SimulatedDataset
 FORMATS: tuple[str, ...] = ("parquet", "csv", "duckdb")
 
 # Output table name → attribute on SimulatedDataset.
-_TABLES = ("readings", "units", "vehicle_classes", "regions", "contracts")
+_TABLES = ("readings", "units", "vehicle_classes", "equipment_models", "regions", "contracts")
 
 
 def _tables(ds: SimulatedDataset) -> dict[str, pd.DataFrame]:
@@ -86,6 +86,13 @@ def _manifest(ds: SimulatedDataset, fmt: str) -> dict:
         "days": cfg.days,
         "failure_horizon_h": cfg.failure_horizon_h,
         "anomaly_rates": cfg.resolved_anomaly_rates(),
+        "season": {
+            "id": cfg.season.id,
+            "ambient_delta_c": cfg.season.ambient_delta_c,
+            "wear_mult": cfg.season.wear_mult,
+            "hazard_mult": cfg.season.hazard_mult,
+            "source": cfg.season.source,
+        },
         "operator_name": cfg.fleet.operator_name,
         "format": fmt,
         "n_units": int(ds.units.shape[0]),
@@ -142,12 +149,20 @@ def _dataset_dictionary_md(ds: SimulatedDataset) -> str:
         "",
         "## Dimension tables",
         "",
-        "- `units` — one row per machine (class, contract, region, build year, era, "
-        "runtime/age at window start).",
+        "- `units` — one row per machine (class, **model**, contract, region, build "
+        "year, era, runtime/age at window start).",
         "- `vehicle_classes` — machinery classes and their duty/wear parameters.",
+        "- `equipment_models` — concrete makes/models per class (Tier-2): per-mode "
+        "failure-hazard multipliers and baseline signature offsets. Documented "
+        "plausibility for a fictional operator.",
         "- `regions` — deployment geographies with public-grounded climate/terrain "
         "(see the `source` column).",
         "- `contracts` — jobs per region.",
+        "",
+        "The run's **season** (Tier-2 — a baseline / heatwave / cold-snap / wet-season "
+        "modifier, the knob a future drift demo shifts) is recorded in `manifest.json` "
+        "(`season`), with its ambient delta, wear multiplier, per-mode hazard "
+        "multipliers, and public source class.",
         "",
         "_SPN ranges/units are the published SAE J1939-71 values; see "
         "`docs/DATA_DICTIONARY.md` for the full signal spec._",

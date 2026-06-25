@@ -37,8 +37,9 @@ detection) has something real to work on.
 > DuckDB tables plus a manifest and a generated data dictionary. Same config + seed →
 > byte-identical output, and `forge validate` reports the distributions as plausible
 > (in-spec + drift-free offline, with an opt-in CC-BY real-data overlap). Still
-> building phase by phase (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2/3
-> diversity (F5).
+> building phase by phase (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2
+> diversity — more regions, equipment models, and seasons — shipped (F5); Tier-3
+> CAN-frame faults remain (F6).
 
 ## Why it's credible (and clean-room)
 
@@ -106,20 +107,23 @@ The entry point is a single command:
 ```bash
 pip install -e .
 
-# Generate the bundled default fleet (~106 units × 90 days) to Parquet:
+# Generate the bundled default fleet (~134 units × 90 days) to Parquet:
 forge generate --out out/
 
 # Or point at a config, pick a seed, format and a smaller window:
 forge generate --config configs/fleet.json --seed 42 --format duckdb \
   --days 30 --resolution 5min --out out/
+
+# Tier-2: apply a seasonal anomaly (the knob a future drift demo shifts):
+forge generate --season heatwave --out out/
 ```
 
 This writes the tidy `readings` table — signals plus the labels
 `failure_within_h` / `failure_mode` and `anomaly_type` / `anomaly_signal` (with an
 `is_outlier` rollup) so every injected defect is recoverable — plus `units` /
-`vehicle_classes` / `regions` / `contracts` dimension tables, a `manifest.json`
-(provenance + run parameters + per-type defect counts), and a generated
-`dataset_dictionary.md`. The default config in
+`vehicle_classes` / `equipment_models` / `regions` / `contracts` dimension tables, a
+`manifest.json` (provenance + run parameters + per-type defect counts + the run's
+season), and a generated `dataset_dictionary.md`. The default config in
 [`configs/fleet.json`](configs/fleet.json) is a fictional international operator
 whose regions are pinned to **cited public climate-type + road-roughness sources**
 (see [`docs/DATA_DESIGN.md`](docs/DATA_DESIGN.md) §6) — never any private data.
@@ -172,10 +176,14 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
 - **Tier 1 (MVP):** one fleet with realistic composition, core J1939 signals gated
   by capability era, a multi-mode failure label, deliberate bad data and obvious
   labeled outliers.
-- **Tier 2:** multiple regions/contracts with climate, terrain and seasonal
-  effects, multiple equipment models with distinct failure profiles.
+- **Tier 2 (shipped in F5):** six contrasting public-grounded regions/contracts, a
+  catalog of **equipment models** with distinct reliability + signature profiles
+  (per-mode hazard multipliers, baseline offsets, optional capability floor), and
+  configurable **seasons** (`heatwave` / `cold_snap` / `wet_season`) — the knob a
+  future drift demo shifts.
 - **Tier 3:** joint/contextual outliers and stuck/drift/dropout sensor faults
-  (shipped in F3); CAN-frame fault patterns remain for F5.
+  (shipped in F3); **CAN-frame** fault patterns remain for F6 (they need the
+  frame-level encoder).
 
 ## Roadmap
 
@@ -186,7 +194,8 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
 | **F2** | Fleet simulator + Parquet/CSV/DuckDB writers — **Tier 1 ships (MVP)** ✅ |
 | **F3** | Labeled anomaly & sensor-fault injection (declarative injector registry) ✅ |
 | **F4** | Distribution validation vs a license-checked public dataset (offline in-spec/golden + opt-in CC-BY VED overlap) ✅ |
-| **F5** | Diversity (Tier 2) + richer faults (Tier 3) |
+| **F5** | Diversity (Tier 2): more regions + equipment models + seasons ✅ |
+| **F6** | CAN-frame faults (Tier 3) + the frame-level encoder they need |
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for objectives and definitions of done,
 and [`docs/DECISIONS.md`](docs/DECISIONS.md) for the design rationale (ADRs).

@@ -29,10 +29,25 @@ import pandas as pd
 
 from ..anomalies import ANOMALY_TYPES, apply_anomalies
 from ..config import ForgeConfig
-from ..labels import derive_unit_labels
+from ..labels import FAILURE_MODES, derive_unit_labels
 from ..signals import generate_unit, signal_names
 from .drivers import drivers_for_unit
 from .fleet import Unit, build_fleet
+
+
+def _merge_hazard_mults(*mults: dict[str, float]) -> dict[str, float]:
+    """Combine per-mode hazard multipliers multiplicatively (model × season).
+
+    Each input maps a failure mode → multiplier; absent modes are ``1.0``. The
+    result carries every known :data:`FAILURE_MODES` mode (so callers can index it
+    safely) as the product across inputs.
+    """
+    merged = {mode: 1.0 for mode in FAILURE_MODES}
+    for m in mults:
+        for mode, value in m.items():
+            if mode in merged:
+                merged[mode] *= value
+    return merged
 
 # Child-stream ordering per unit (kept explicit so the seeding is auditable). The
 # first three are the F2 stages; each anomaly injector then gets its own stream so
@@ -56,6 +71,7 @@ class SimulatedDataset:
     readings: pd.DataFrame
     units: pd.DataFrame
     vehicle_classes: pd.DataFrame
+    equipment_models: pd.DataFrame
     regions: pd.DataFrame
     contracts: pd.DataFrame
     config: ForgeConfig
@@ -69,6 +85,32 @@ def _dimension_tables(config: ForgeConfig, units: list[Unit]) -> dict[str, pd.Da
             for vc in f.vehicle_classes
         ]
     )
+    equipment_models = pd.DataFrame(
+        [
+            {
+                "model_id": m.id,
+                "label": m.label,
+                "vehicle_class_id": m.vehicle_class_id,
+                "hazard_overheat": m.hazard_mult.get("overheat", 1.0),
+                "hazard_oil_starve": m.hazard_mult.get("oil_starve", 1.0),
+                "hazard_bearing": m.hazard_mult.get("bearing", 1.0),
+                "coolant_offset_c": m.coolant_offset_c,
+                "oil_offset_kpa": m.oil_offset_kpa,
+                "vibration_offset_mms": m.vibration_offset_mms,
+                # Nullable int: a model that doesn't pin a capability floor is NULL,
+                # not 0 — and stays a clean integer column across all writers.
+                "build_year_min": (
+                    pd.NA if m.build_year_min is None else m.build_year_min
+                ),
+            }
+            for m in f.equipment_models
+        ],
+        columns=[
+            "model_id", "label", "vehicle_class_id", "hazard_overheat",
+            "hazard_oil_starve", "hazard_bearing", "coolant_offset_c",
+            "oil_offset_kpa", "vibration_offset_mms", "build_year_min",
+        ],
+    ).astype({"build_year_min": "Int64"})
     regions = pd.DataFrame(
         [
             {
@@ -94,6 +136,7 @@ def _dimension_tables(config: ForgeConfig, units: list[Unit]) -> dict[str, pd.Da
             {
                 "unit_id": u.unit_id,
                 "vehicle_class_id": u.vehicle_class_id,
+                "model_id": u.model_id,
                 "contract_id": u.contract_id,
                 "region_id": u.region_id,
                 "build_year": u.build_year,
@@ -107,6 +150,7 @@ def _dimension_tables(config: ForgeConfig, units: list[Unit]) -> dict[str, pd.Da
     )
     return {
         "vehicle_classes": vehicle_classes,
+        "equipment_models": equipment_models,
         "regions": regions,
         "contracts": contracts,
         "units": units_df,
@@ -146,13 +190,17 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
             for k, atype in enumerate(ANOMALY_TYPES)
         }
 
-        drivers = drivers_for_unit(unit, region, n, step_h, rng_drivers)
+        drivers = drivers_for_unit(unit, region, config.season, n, step_h, rng_drivers)
         signals = generate_unit(unit.era, drivers, rng_signals)
+
+        # Per-mode hazard multiplier = the unit's equipment-model reliability × the
+        # run's season (Tier-2, F5). Missing modes default to 1.0 downstream.
+        hazard_mult = _merge_hazard_mults(unit.hazard_mult, config.season.hazard_mult)
 
         # Label failures from the CLEAN signals (before any defect is injected) so a
         # glitch is never mistaken for a failure signature (ADR-009).
         labels = derive_unit_labels(
-            signals, drivers.wear, step_h, config.failure_horizon_h, rng_labels
+            signals, drivers.wear, step_h, config.failure_horizon_h, rng_labels, hazard_mult
         )
 
         # Inject all labeled defects AFTER labelling (ADR-006/-016).
@@ -187,6 +235,7 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         readings=readings,
         units=dims["units"],
         vehicle_classes=dims["vehicle_classes"],
+        equipment_models=dims["equipment_models"],
         regions=dims["regions"],
         contracts=dims["contracts"],
         config=config,
