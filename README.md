@@ -143,15 +143,26 @@ forge validate --seed 42
 # Opt into a real-data comparison (Vehicle Energy Dataset, CC-BY 4.0):
 pip install -e '.[validate]'
 forge validate --seed 42 --dataset ved --report report.md
+
+# Point at a different Kaggle VED mirror if you like:
+forge validate --dataset ved --ved-handle owner/slug
 ```
 
-The optional `ved` adapter overlaps the shared engine channels (RPM, engine load,
-fuel rate, coolant temp) against the **[Vehicle Energy Dataset](https://www.kaggle.com/datasets/saurabhshahane/vehicle-energy-dataset)**
-(Kaggle, **CC-BY 4.0**), **fetched at run time via the Kaggle API and never
-committed**. VED is light-vehicle OBD-II, so the overlap is a *plausibility
-sanity-check on shared channels, not an equivalence claim* — stated plainly in the
-report. CI never requests it and the offline checks always stand on their own
-(rationale in [ADR-017](docs/DECISIONS.md)).
+The optional `ved` adapter overlaps the shared engine channels (engine RPM, engine
+load) against the **[Vehicle Energy Dataset](https://www.kaggle.com/datasets/yashseth25/ved-segregated)**
+(Kaggle, **CC-BY 4.0**), **fetched at run time and never committed**. VED is
+light-vehicle OBD-II, so the overlap is a *plausibility sanity-check on shared
+channels, not an equivalence claim* — stated plainly in the report. A live run gives
+a histogram-intersection overlap of **~0.48 (engine RPM) / ~0.51 (engine load)**
+against 200k VED rows. CI never requests it and the offline checks always stand on
+their own (rationale in [ADR-017](docs/DECISIONS.md)).
+
+**Auth for `--dataset ved`.** The fetch uses the classic Kaggle REST endpoint with
+your **legacy** API credentials — put a `kaggle.json` (Kaggle → Settings → API →
+*Create Legacy API Key*) at `~/.kaggle/kaggle.json`. The dataset handle is
+configurable (`--ved-handle` / `FORGE_VED_HANDLE`), so a moved/renamed mirror is a
+flag change, not a code edit. (Behind a TLS-inspecting proxy, e.g. some corporate
+antivirus, install `pip-system-certs` so Python trusts the system certificate store.)
 
 ## Data tiers
 

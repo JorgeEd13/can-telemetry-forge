@@ -394,6 +394,28 @@ portfolio report — over a KS/EMD statistic whose magnitude needs interpretatio
 plausibility sanity-check on shared channels, *not* an equivalence claim, since VED
 isn't heavy-equipment J1939 — stated in the report). Adding a future reference (a
 heavier-duty public set, a synthetic baseline) is a local registry entry, not a
-rewrite. `kaggle` is a `validate`-extra dependency only; the core install and CI stay
-lean. The clean-room invariant (ADR-003) is preserved end to end: no real data is
-shipped, committed, or used as a seed — only fetched transiently to compare.
+rewrite. The core install and CI stay lean. The clean-room invariant (ADR-003) is
+preserved end to end: no real data is shipped, committed, or used as a seed — only
+fetched transiently to compare.
+
+**Addendum (run-time fetch reality, 2026-06-25).** Wiring the live fetch surfaced
+three things that changed the implementation (kept here because they are the kind of
+detail a reader hits too):
+
+1. *The Kaggle SDKs don't authorize dataset downloads reliably here.* The new-style
+   **access token** authenticates (`whoami` works) but returns **403** on every
+   dataset download; the **legacy key** does too **through `kagglehub`/`kaggle`**,
+   because those route via `api.kaggle.com`. The **classic REST endpoint**
+   (`www.kaggle.com/api/v1/datasets/download/...`) with **HTTP Basic auth** from
+   `~/.kaggle/kaggle.json` works. So the fetch calls that endpoint directly with
+   `requests` (the only `validate`-extra dep) — lighter and more robust than the SDKs.
+2. *TLS interception.* On a managed Windows host, Norton's "SSL/TLS scanning"
+   presents its own CA, so `certifi` verification fails. Fix is environment-side
+   (`pip-system-certs` → use the Windows trust store), **not** disabling verification.
+   Noted so a future run on such a host knows the cause.
+3. *The handle must be configurable.* The originally-assumed handle didn't exist; a
+   single hardcoded handle rots. The adapter takes `--ved-handle` / `FORGE_VED_HANDLE`
+   / `ved_handle` config, defaulting to a **verified** mirror (`yashseth25/ved-segregated`,
+   CC-BY 4.0), and skips any mapped column the chosen mirror doesn't carry. Verified
+   live: synthetic vs VED histogram overlap **0.48 (engine RPM) / 0.51 (engine load)**
+   over 200k VED rows — plausible for the shared channels, as framed.

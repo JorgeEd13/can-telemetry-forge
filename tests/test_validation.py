@@ -142,7 +142,7 @@ def test_ved_degrades_when_fetch_fails(tmp_path, monkeypatch) -> None:
     import validation.reference as ref
     from can_telemetry_forge.sim import simulate
 
-    def _boom(cache_dir):
+    def _boom(cache_dir, handle=None):
         raise RuntimeError("forced: no VED in test")
 
     monkeypatch.setattr(ref, "_load_ved_frame", _boom)
@@ -151,6 +151,18 @@ def test_ved_degrades_when_fetch_fails(tmp_path, monkeypatch) -> None:
     assert result.adapter == "ved"
     assert result.available is False
     assert "unavailable" in result.note.lower()
+
+
+def test_ved_handle_is_configurable(monkeypatch) -> None:
+    # Default, env override, and explicit arg precedence for the VED dataset handle.
+    import validation.reference as ref
+
+    monkeypatch.delenv("FORGE_VED_HANDLE", raising=False)
+    assert ref._resolve_ved_handle(None) == ref.DEFAULT_VED_HANDLE
+    assert ref._resolve_ved_handle("owner/slug") == "owner/slug"  # explicit wins
+    monkeypatch.setenv("FORGE_VED_HANDLE", "envowner/envslug")
+    assert ref._resolve_ved_handle(None) == "envowner/envslug"  # env over default
+    assert ref._resolve_ved_handle("owner/slug") == "owner/slug"  # explicit over env
 
 
 def test_ved_overlap_with_a_fake_local_csv(tmp_path, monkeypatch) -> None:
@@ -163,17 +175,17 @@ def test_ved_overlap_with_a_fake_local_csv(tmp_path, monkeypatch) -> None:
 
     cache = tmp_path / "ved"
     cache.mkdir()
-    # Minimal VED-schema CSV covering two mapped columns.
+    # Minimal VED-schema CSV covering the two mapped columns (current VED schema).
     pd.DataFrame(
         {
-            "Engine RPM[RPM]": np.linspace(700, 2200, 500),
-            "Absolute Load[%]": np.linspace(5, 95, 500),
+            "Engine_RPM_RPM": np.linspace(700, 2200, 500),
+            "Absolute_Load_pct": np.linspace(5, 95, 500),
         }
     ).to_csv(cache / "trip.csv", index=False)
-    # Guard: importing kaggle must never happen on the cached path.
+    # Guard: no network on the cached path — return the fake frame directly.
     monkeypatch.setattr(
         ref, "_load_ved_frame",
-        lambda cache_dir: pd.read_csv(sorted(cache_dir.glob("*.csv"))[0]),
+        lambda cache_dir, handle=None: pd.read_csv(sorted(cache_dir.glob("*.csv"))[0]),
     )
     readings = simulate(small_config()).readings
     result = ref._check_ved(readings, ref._units_map(), cache_dir=cache)

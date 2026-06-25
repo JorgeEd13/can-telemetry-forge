@@ -104,6 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Energy Dataset (CC-BY 4.0), fetched at run time, never committed."
         ),
     )
+    validate.add_argument(
+        "--ved-handle",
+        metavar="OWNER/SLUG",
+        help=(
+            "Kaggle dataset handle for the 'ved' adapter (default: FORGE_VED_HANDLE "
+            "env or the bundled default). Must carry the OBD-II engine columns."
+        ),
+    )
 
     return parser
 
@@ -166,7 +174,7 @@ def _run_validate(args: argparse.Namespace) -> int:
         config = replace(config, seed=args.seed).validate()
 
     datasets = tuple(args.dataset)
-    run = run_validation(config, datasets=datasets)
+    run = run_validation(config, datasets=datasets, ved_handle=args.ved_handle)
     report = render_report(run, datasets=datasets)
 
     if args.report:

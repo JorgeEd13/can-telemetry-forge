@@ -131,10 +131,13 @@ fetched at run time via the Kaggle API, **never committed**, degrades gracefully
 offline). Offline adapters always run so `forge validate` is reproducible-by-anyone
 and CI-safe; `--dataset ved` layers the real-data comparison on top. Real `forge
 validate --config --seed --report --dataset` wired over the library; `kaggle` is a
-`validate`-extra dep only. **16 new offline tests (89 total green)** — the VED path
-is tested via a fake-local-CSV (overlap math) and its graceful-unavailable branch,
-never hitting the network in CI; `forge validate` writes UTF-8 so the report renders
-on a legacy-codepage console.
+offline-deterministic tests cover the adapters; the VED path is tested via a
+fake-local-CSV (overlap math) and its graceful-unavailable branch, never hitting the
+network in CI; `forge validate` writes UTF-8 so the report renders on a legacy-codepage
+console. **VED verified live** (ADR-017 addendum): the configurable handle
+(`--ved-handle`, default `yashseth25/ved-segregated`) fetched via the classic Kaggle
+REST endpoint (legacy key, `requests` only) gave histogram overlap **0.48 engine RPM /
+0.51 engine load** over 200k VED rows.
 
 ---
 
