@@ -46,14 +46,33 @@ def test_help_flag_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     assert "usage:" in capsys.readouterr().out.lower()
 
 
-def test_validate_still_fails_honestly(capsys: pytest.CaptureFixture[str]) -> None:
-    # `forge validate` lands in F4; until then it must fail honestly, not pretend.
-    with pytest.raises(SystemExit) as exc:
-        main(["validate"])
-    assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "not implemented" in err.lower()
-    assert "F4" in err
+def test_validate_runs_offline_and_passes(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # `forge validate` (F4) runs the offline adapters with no network and exits 0
+    # when the generated run is in-spec. (Network/VED checks are opt-in, not here.)
+    # A tiny config keeps it off the 90-day default fleet.
+    import json
+
+    cfg = tmp_path / "tiny.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "days": 1,
+                "resolution": "5min",
+                "fleet": {
+                    "contracts": [
+                        {"id": "t", "label": "T", "region_id": "temperate_lowland", "units": 4, "duty_bias": 0.0}
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    rc = main(["validate", "--config", str(cfg), "--seed", "7"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Distribution validation report" in out
 
 
 def test_generate_requires_out() -> None:
