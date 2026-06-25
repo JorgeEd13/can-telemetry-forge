@@ -29,6 +29,10 @@ from pathlib import Path
 import numpy as np
 
 from .anomalies import ANOMALY_TYPES, DEFAULT_ANOMALY_RATES
+from .labels import FAILURE_MODES
+
+# Failure-mode ids a hazard_mult map may key on (validated against the label model).
+_FAILURE_MODE_IDS: frozenset[str] = frozenset(FAILURE_MODES)
 
 # --- resolution ---------------------------------------------------------------
 
@@ -105,6 +109,71 @@ class Contract:
 
 
 @dataclass(frozen=True)
+class EquipmentModel:
+    """A concrete make/model within a vehicle class (Tier-2 diversity, F5).
+
+    A real fleet is not just classes of identical machines: two haul trucks of
+    different makes run hotter or cooler and fail differently. A model carries a
+    **per-mode hazard multiplier** (so the same class can host a robust model and a
+    failure-prone one) and small **signal baseline offsets** that shift its thermal
+    and mechanical signature without breaking the documented J1939 ranges. Modeled
+    as **documented plausibility** for a fictional operator — never a real spec
+    sheet (the ADR-011 private-boundary note holds).
+
+    The optional ``build_year_min`` lets a model gate its own CAN capability era
+    floor (a model that only ever shipped Modern hardware), refining the coarse
+    per-era whitelist of §4 toward a per-model one — but defaults to ``None`` so the
+    class-level age curve is unchanged unless a model opts in.
+
+    Attributes:
+        id / label: identifiers.
+        vehicle_class_id: the :class:`VehicleClass` this model belongs to.
+        hazard_mult: per-failure-mode hazard multipliers (``overheat`` /
+            ``oil_starve`` / ``bearing``); missing modes default to ``1.0``.
+        coolant_offset_c / oil_offset_kpa / vibration_offset_mms: small additive
+            shifts to the model's baseline signature (engineering units).
+        build_year_min: optional per-model earliest build year (capability floor).
+    """
+
+    id: str
+    label: str
+    vehicle_class_id: str
+    hazard_mult: dict[str, float] = field(default_factory=dict)
+    coolant_offset_c: float = 0.0
+    oil_offset_kpa: float = 0.0
+    vibration_offset_mms: float = 0.0
+    build_year_min: int | None = None
+
+
+@dataclass(frozen=True)
+class Season:
+    """A named, configurable seasonal modifier (Tier-2 diversity, F5).
+
+    Seasonality is the knob a future **drift demo** (the 4th vitrine) shifts: a
+    heatwave / cold-snap / wet-season episode that moves the whole fleet's ambient
+    baseline and tilts its failure hazards, without touching the generator. A
+    season is **documented plausibility** (a public-climate-class anomaly), applied
+    on top of each region's own ambient curve.
+
+    Attributes:
+        id / label: identifiers (``"baseline"`` is the neutral default).
+        ambient_delta_c: additive shift to every unit's ambient temperature (°C).
+        wear_mult: multiplier on accumulated-wear hazard gain (a wet/hot season
+            accelerates degradation); ``1.0`` is neutral.
+        hazard_mult: per-failure-mode hazard multipliers (e.g. a heatwave raises
+            ``overheat``); missing modes default to ``1.0``.
+        source: the public climate-anomaly class the constants are grounded in.
+    """
+
+    id: str
+    label: str
+    ambient_delta_c: float = 0.0
+    wear_mult: float = 1.0
+    hazard_mult: dict[str, float] = field(default_factory=dict)
+    source: str = ""
+
+
+@dataclass(frozen=True)
 class FleetSpec:
     """The catalog the fleet is sampled from (composition backbone, DATA_DESIGN §3).
 
@@ -124,6 +193,7 @@ class FleetSpec:
     build_year_max: int
     build_year_mode: int
     units_per_contract_sd_frac: float
+    equipment_models: tuple[EquipmentModel, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -147,6 +217,7 @@ class ForgeConfig:
     failure_horizon_h: float = 168.0  # one week
     obvious_outlier_rate: float | None = None  # back-compat alias for anomaly_rates["obvious_outlier"]
     anomaly_rates: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_ANOMALY_RATES))
+    season: Season = field(default_factory=lambda: SEASONS["baseline"])  # Tier-2 (F5)
     seed: int = 42
 
     def resolved_anomaly_rates(self) -> dict[str, float]:
@@ -212,6 +283,30 @@ class ForgeConfig:
                 raise ValueError(f"contract {c.id!r} must expect a positive unit count")
         if not (f.build_year_min <= f.build_year_mode <= f.build_year_max):
             raise ValueError("require build_year_min <= mode <= max")
+        # Tier-2 (F5): equipment models must reference known classes; every class in
+        # the mix that has any models must be fully covered (so every sampled unit of
+        # that class can be assigned a model), and hazard keys must be real modes.
+        model_class_ids = {m.vehicle_class_id for m in f.equipment_models}
+        unknown_model_classes = model_class_ids - class_ids
+        if unknown_model_classes:
+            raise ValueError(f"equipment_models reference unknown classes: {unknown_model_classes}")
+        for m in f.equipment_models:
+            bad_modes = set(m.hazard_mult) - _FAILURE_MODE_IDS
+            if bad_modes:
+                raise ValueError(f"equipment_model {m.id!r} hazard_mult has unknown modes: {bad_modes}")
+            if any(v < 0 for v in m.hazard_mult.values()):
+                raise ValueError(f"equipment_model {m.id!r} hazard_mult must be non-negative")
+            if m.build_year_min is not None and not (
+                f.build_year_min <= m.build_year_min <= f.build_year_max
+            ):
+                raise ValueError(
+                    f"equipment_model {m.id!r} build_year_min out of fleet range"
+                )
+        bad_season_modes = set(self.season.hazard_mult) - _FAILURE_MODE_IDS
+        if bad_season_modes:
+            raise ValueError(f"season {self.season.id!r} hazard_mult has unknown modes: {bad_season_modes}")
+        if self.season.wear_mult < 0 or any(v < 0 for v in self.season.hazard_mult.values()):
+            raise ValueError(f"season {self.season.id!r} multipliers must be non-negative")
         return self
 
 
@@ -283,6 +378,28 @@ _REGIONS: tuple[Region, ...] = (
         wear_modifier=1.10,  # thermal cycling / cold starts add hazard
         source="Köppen Dfb cold-continental normals; IRI band 'fair paved' (~4-6 m/km)",
     ),
+    # --- Tier-2 (F5) broadens the international footprint with two more contrasting
+    # public-grounded deployments (see DATA_DESIGN §6/§9). ---
+    Region(
+        id="hot_desert_lowland",
+        label="Hot desert logistics (extreme heat, low altitude, graded tracks)",
+        ambient_c_mean=29.0,
+        ambient_c_amplitude=16.0,
+        altitude_m=80.0,
+        terrain_roughness=0.55,
+        wear_modifier=1.35,  # extreme heat + dust = harshest thermal/filter load
+        source="Köppen BWh hot-desert normals; IRI band 'poor unsealed' (~6-9 m/km)",
+    ),
+    Region(
+        id="alpine_subarctic",
+        label="Alpine subarctic works (severe cold, very high altitude, rough)",
+        ambient_c_mean=-3.0,
+        ambient_c_amplitude=20.0,
+        altitude_m=3000.0,
+        terrain_roughness=0.70,
+        wear_modifier=1.20,  # deep-cold starts + thin air + rough terrain
+        source="Köppen Dfc subarctic normals; IRI band 'rough mountain track' (~8-11 m/km)",
+    ),
 )
 
 _CONTRACTS: tuple[Contract, ...] = (
@@ -290,7 +407,104 @@ _CONTRACTS: tuple[Contract, ...] = (
     Contract(id="ct_highway", label="Lowland highway logistics", region_id="temperate_lowland", units=28, duty_bias=-0.05),
     Contract(id="cw_delta", label="Tropical delta earthworks", region_id="tropical_humid", units=24, duty_bias=0.08),
     Contract(id="cc_north", label="Northern site construction", region_id="cold_continental", units=18, duty_bias=0.00),
+    # Tier-2 (F5): two more contracts on the broadened regions.
+    Contract(id="cd_dunes", label="Desert pipeline logistics", region_id="hot_desert_lowland", units=22, duty_bias=0.06),
+    Contract(id="ca_pass", label="Alpine pass roadworks", region_id="alpine_subarctic", units=14, duty_bias=0.03),
 )
+
+# --- Equipment models (Tier-2, F5) -------------------------------------------
+# Concrete makes/models within the vehicle classes: a robust and a failure-prone
+# variant per heavy class, so the same class hosts genuinely different reliability
+# and signatures. Documented plausibility for the FICTIONAL operator — never a real
+# spec sheet (ADR-011 boundary holds). Light support vehicles are left class-only
+# (a single generic profile) to keep the catalog readable.
+_EQUIPMENT_MODELS: tuple[EquipmentModel, ...] = (
+    # Haul trucks: an old-school robust hauler vs a hotter-running high-output one.
+    EquipmentModel(
+        id="ht_atlas",
+        label="Atlas RT-90 rigid hauler (robust, runs cool)",
+        vehicle_class_id="haul_truck",
+        hazard_mult={"overheat": 0.85, "oil_starve": 0.90, "bearing": 1.00},
+        coolant_offset_c=-3.0,
+        oil_offset_kpa=15.0,
+    ),
+    EquipmentModel(
+        id="ht_vulcan",
+        label="Vulcan HX high-output hauler (runs hot, modern only)",
+        vehicle_class_id="haul_truck",
+        hazard_mult={"overheat": 1.30, "oil_starve": 1.05, "bearing": 1.10},
+        coolant_offset_c=4.0,
+        vibration_offset_mms=0.4,
+        build_year_min=2015,  # only ever shipped Modern-era hardware
+    ),
+    # Wheel loaders: a reliable workhorse vs a vibration-prone budget model.
+    EquipmentModel(
+        id="wl_terra",
+        label="Terra L5 wheel loader (balanced)",
+        vehicle_class_id="wheel_loader",
+        hazard_mult={"bearing": 0.95},
+    ),
+    EquipmentModel(
+        id="wl_drako",
+        label="Drako WL budget loader (bearing-prone)",
+        vehicle_class_id="wheel_loader",
+        hazard_mult={"bearing": 1.35, "oil_starve": 1.10},
+        vibration_offset_mms=0.8,
+        oil_offset_kpa=-12.0,
+    ),
+    # Excavators: a clean modern model vs an oil-starvation-prone legacy line.
+    EquipmentModel(
+        id="ex_orion",
+        label="Orion 360 excavator (clean modern)",
+        vehicle_class_id="excavator",
+        hazard_mult={"overheat": 0.95, "oil_starve": 0.90},
+    ),
+    EquipmentModel(
+        id="ex_kratoken",
+        label="Kratoken EX legacy excavator (oil-starve-prone)",
+        vehicle_class_id="excavator",
+        hazard_mult={"oil_starve": 1.40},
+        oil_offset_kpa=-18.0,
+        coolant_offset_c=2.0,
+    ),
+)
+
+# --- Seasons (Tier-2, F5) ----------------------------------------------------
+# Named seasonal modifiers applied on top of every region's own ambient curve. The
+# neutral "baseline" is the default; the others are the knob a future drift demo
+# (the 4th vitrine) shifts. Documented plausibility from public climate-anomaly
+# classes — never private data.
+SEASONS: dict[str, Season] = {
+    "baseline": Season(
+        id="baseline",
+        label="Baseline (no seasonal anomaly)",
+        source="Region climate normals only (no anomaly applied)",
+    ),
+    "heatwave": Season(
+        id="heatwave",
+        label="Heatwave episode (hot anomaly)",
+        ambient_delta_c=8.0,
+        wear_mult=1.20,
+        hazard_mult={"overheat": 1.60, "oil_starve": 1.20},
+        source="Public heatwave anomaly class (sustained +6-10 °C over normals)",
+    ),
+    "cold_snap": Season(
+        id="cold_snap",
+        label="Cold snap episode (cold anomaly)",
+        ambient_delta_c=-12.0,
+        wear_mult=1.15,
+        hazard_mult={"oil_starve": 1.25, "bearing": 1.15},
+        source="Public cold-snap anomaly class (sustained -8-14 °C below normals)",
+    ),
+    "wet_season": Season(
+        id="wet_season",
+        label="Wet season (humid anomaly)",
+        ambient_delta_c=2.0,
+        wear_mult=1.25,
+        hazard_mult={"bearing": 1.20, "oil_starve": 1.10},
+        source="Public wet-season anomaly class (elevated humidity, accelerated wear)",
+    ),
+}
 
 _DEFAULT_FLEET = FleetSpec(
     operator_name="Meridian Heavy Fleet Co. (fictional)",
@@ -302,11 +516,16 @@ _DEFAULT_FLEET = FleetSpec(
     build_year_max=2024,
     build_year_mode=2016,  # mode skewed recent, with a tail of legacy units
     units_per_contract_sd_frac=0.10,
+    equipment_models=_EQUIPMENT_MODELS,
 )
 
 
 def default_config() -> ForgeConfig:
-    """A complete, runnable, public-grounded Tier-1 config (~104 units × 90 days)."""
+    """A complete, runnable, public-grounded config (~140 units × 90 days).
+
+    Ships the Tier-2 (F5) diversity: six contrasting public-grounded regions, a
+    catalog of equipment models with distinct reliability/signature profiles, and a
+    neutral ``baseline`` season (the drift knob other seasons shift)."""
     return ForgeConfig(fleet=_DEFAULT_FLEET).validate()
 
 
@@ -327,6 +546,14 @@ def _contract(d: dict) -> Contract:
     return Contract(**d)
 
 
+def _equipment_model(d: dict) -> EquipmentModel:
+    return EquipmentModel(**d)
+
+
+def _season(d: dict) -> Season:
+    return Season(**d)
+
+
 def _fleet_from_dict(d: dict, base: FleetSpec) -> FleetSpec:
     """Merge a fleet dict onto ``base`` (only provided keys override)."""
     kwargs: dict = {}
@@ -340,6 +567,8 @@ def _fleet_from_dict(d: dict, base: FleetSpec) -> FleetSpec:
         kwargs["regions"] = tuple(_region(x) for x in d["regions"])
     if "contracts" in d:
         kwargs["contracts"] = tuple(_contract(x) for x in d["contracts"])
+    if "equipment_models" in d:
+        kwargs["equipment_models"] = tuple(_equipment_model(x) for x in d["equipment_models"])
     for key in ("build_year_min", "build_year_max", "build_year_mode", "units_per_contract_sd_frac"):
         if key in d:
             kwargs[key] = d[key]
@@ -358,7 +587,26 @@ def config_from_dict(d: dict) -> ForgeConfig:
     # anomaly_rates merges onto the defaults (a small file can tweak one type).
     if "anomaly_rates" in d:
         top["anomaly_rates"] = {**DEFAULT_ANOMALY_RATES, **dict(d["anomaly_rates"])}
+    # season is either a named preset ("heatwave") or an inline Season dict.
+    if "season" in d:
+        top["season"] = resolve_season(d["season"])
     return replace(base, fleet=fleet, **top).validate()
+
+
+def resolve_season(spec: str | dict) -> Season:
+    """Turn a config ``season`` value into a :class:`Season`.
+
+    A string selects a named preset from :data:`SEASONS` (``"heatwave"``,
+    ``"cold_snap"``, ``"wet_season"``, ``"baseline"``); a dict defines one inline.
+    """
+    if isinstance(spec, str):
+        try:
+            return SEASONS[spec]
+        except KeyError as exc:
+            raise ValueError(
+                f"unknown season {spec!r}; known: {sorted(SEASONS)}"
+            ) from exc
+    return _season(spec)
 
 
 def load_config(path: str | Path | None) -> ForgeConfig:
@@ -373,11 +621,15 @@ __all__ = [
     "VehicleClass",
     "Region",
     "Contract",
+    "EquipmentModel",
+    "Season",
     "FleetSpec",
     "ForgeConfig",
     "RESOLUTION_STEP_HOURS",
     "DEFAULT_RESOLUTION",
+    "SEASONS",
     "default_config",
     "config_from_dict",
     "load_config",
+    "resolve_season",
 ]

@@ -4,18 +4,21 @@ Updated: 2026-06-25
 
 ## Current focus
 
-**F4 is done — distribution validation ships.** `forge validate` is real (no longer
-a stub): a `validation/` package (outside `src/` — the core never imports it) built
-as a **declarative registry of reference adapters** (ADR-017, mirroring ADR-012/-016).
-Two **offline** adapters always run — `in_spec` (values inside documented J1939
-ranges) and `golden` (per-signal mean/std match a *recomputed* pinned reference run,
-catching generator drift; nothing committed) — so the command is reproducible by
-anyone and CI-safe. A third **opt-in** adapter `ved` overlaps the shared engine
-channels against the **Vehicle Energy Dataset** (Kaggle, **CC-BY 4.0**) via
-histogram intersection, **fetched at run time through the Kaggle API and never
-committed**; it degrades to "unavailable" offline. Output is a self-contained
-Markdown report. `kaggle` is a `validate`-extra dep only. Next is **F5** (Tier-2
-diversity + Tier-3 CAN-frame faults).
+**F5 (Tier-2 diversity) is done.** Three axes of realism land as **declarative
+catalog entries that resolve to multipliers/offsets** — no new readings-schema
+columns (ADR-018, mirroring ADR-012/-016): (1) two more public-grounded
+regions/contracts (6 each now); (2) **equipment models** — each `EquipmentModel`
+carries per-failure-mode hazard multipliers + small baseline signature offsets +
+an optional `build_year_min` capability floor, assigned per unit (class-only
+fallback), surfaced as an `equipment_models` dimension table + `units.model_id`;
+(3) named **seasons** (`heatwave` / `cold_snap` / `wet_season` over `baseline`)
+shifting ambient + wear + per-mode hazards — the knob a future drift demo shifts,
+selectable via `--season` / config and echoed in `manifest.json`. The model ×
+season hazard multipliers compose multiplicatively into the single per-mode factor
+`derive_unit_labels` applies, so the failure label stays derived in one place
+(ADR-009). Default fleet → **134 units**. Next is **F6** (Tier-3 **CAN-frame
+faults** + the frame-level encoder they need — the inert PGNs of ADR-013 are the
+seam; deferred from F5 as a substantial standalone build).
 
 ## Done
 
@@ -106,14 +109,38 @@ diversity + Tier-3 CAN-frame faults).
     `yashseth25/ved-segregated`) because the originally-assumed handle didn't exist.
     The 510 MB zip lands in the git-ignored cache, read capped (200k rows × mapped
     cols), never committed.
+- **F5 — Diversity (Tier 2):**
+  - `config.py` — `EquipmentModel` + `Season` dataclasses; catalog grown to 6
+    regions / 6 contracts / 6 equipment models / 4 seasons; validation (model
+    classes, hazard-mode keys, capability floor in range, season multipliers);
+    JSON merge for models + `resolve_season` (named preset or inline). `season`
+    field on `ForgeConfig` (default `baseline`).
+  - `sim/fleet.py` — `Unit` gains `model_id` + offset/hazard fields; `build_fleet`
+    assigns a model per unit (uniform over the class's models, class-only fallback)
+    and draws the build year respecting a per-model `build_year_min` floor.
+  - `sim/drivers.py` — season `ambient_delta_c` added to the ambient curve and
+    `wear_mult` into wear; per-model signature offsets threaded into `DriverSeries`.
+  - `signals/generators.py` — `DriverSeries` carries coolant/oil/vibration offsets,
+    applied inside the J1939-range clamp (default 0.0 → F1 callers unchanged).
+  - `labels/failure.py` — `derive_unit_labels` takes an optional per-mode
+    `hazard_mult` (defaults to neutral → F2 behaviour exact).
+  - `sim/simulate.py` — `_merge_hazard_mults` composes model × season; emits the
+    `equipment_models` dimension table + `units.model_id`; passes season to drivers.
+  - `io/writers.py` — writes `equipment_models`; echoes `season` in the manifest;
+    dictionary documents the new table + season.
+  - `cli.py` — `--season` on `forge generate`.
+  - ADR-018 recorded; ROADMAP F5 ✅ + new F6; DATA_DESIGN §4/§6/§7/§9 updated.
+  - **12 new offline tests (102 total green).** Verified e2e: default fleet → 134
+    units; `equipment_models.csv` written; heatwave run produces more failures than
+    baseline; reproducible under a non-baseline season.
 
 ## Next step (concrete)
 
-**F5 — Diversity (Tier 2) & richer faults (Tier 3).** Broaden regions/climate/season
-and equipment models with distinct failure profiles (Tier 2); add the trickier
-fault patterns (the Tier-3 **CAN-frame faults** land once a frame-level encoder
-exists — the inert PGNs of ADR-013 are the seam). All config-driven, labeled, seeded;
-update DATA_DESIGN to reflect what ships.
+**F6 — CAN-frame faults (Tier 3) & a frame-level encoder.** Build a frame-level
+J1939 encoder (per-PGN byte/bit layout, scaling/offset) over the inert PGNs recorded
+since ADR-013 — that is the seam. Then add CAN-frame fault injectors as new registry
+entries: each is a new `anomaly_type` *value* (ADR-016 — no schema change), labeled
+and recoverable. All config-driven, labeled, seeded; update DATA_DESIGN §8.
 
 ## Notes
 

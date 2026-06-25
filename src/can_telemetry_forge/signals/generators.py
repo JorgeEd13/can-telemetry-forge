@@ -87,6 +87,11 @@ class DriverSeries:
     runtime_start_h: float
     age_days: float
     step_hours: float  # time between timestamps, in hours (e.g. 1/60 for 1-min)
+    # Per-model baseline signature offsets (Tier-2, F5; engineering units, added
+    # before the J1939-range clamp). Default 0.0 so F1-only callers are unchanged.
+    coolant_offset_c: float = 0.0
+    oil_offset_kpa: float = 0.0
+    vibration_offset_mms: float = 0.0
 
 
 def _noise(rng: np.random.Generator, n: int) -> np.ndarray:
@@ -131,6 +136,7 @@ def _coolant_temp_c(
         + 0.15 * (d.ambient_c - 25.0)
         + _COOLANT_LOAD_GAIN_C * load
         + _COOLANT_WEAR_GAIN_C * d.wear
+        + d.coolant_offset_c  # per-model baseline shift (Tier-2)
     )
     return _clamp(temp * _noise(rng, d.n), spec)
 
@@ -145,6 +151,7 @@ def _oil_pressure_kpa(
         _OIL_BASE_KPA
         + _OIL_RPM_GAIN_KPA * rpm_frac
         - _OIL_WEAR_LOSS_KPA * d.wear
+        + d.oil_offset_kpa  # per-model baseline shift (Tier-2)
     )
     return _clamp(press * _noise(rng, d.n), spec)
 
@@ -210,6 +217,7 @@ def _vibration_mms(
         + _VIB_LOAD_GAIN_MMS * (load_pct / 100.0)
         + _VIB_TERRAIN_GAIN_MMS * d.terrain_roughness
         + _VIB_WEAR_GAIN_MMS * d.wear
+        + d.vibration_offset_mms  # per-model baseline shift (Tier-2)
     )
     return _clamp(vib * _noise(rng, d.n), spec)
 

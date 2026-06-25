@@ -106,8 +106,10 @@ SPNs (illustrative grouping — exact SPN-per-era table is committed in
 realistic, learnable property (downstream models must handle structural
 missingness, not impute it as a real reading).
 
-For the MVP, eras are coarse tiers. A future Tier-2 refinement (F5) can move to a
-per-model SPN whitelist for finer fidelity.
+For the MVP, eras are coarse tiers. Tier-2 (F5, ADR-018) takes the first step toward
+a per-model refinement: an `EquipmentModel` may set a `build_year_min` capability
+floor (a model that only ever shipped Modern hardware), so its units never fall into
+an older era. A full per-model SPN whitelist remains a later refinement.
 
 ---
 
@@ -175,10 +177,26 @@ string travels in the `regions` dimension table of every dataset):
 | **tropical_humid** | Köppen **Af** tropical-rainforest normals (hot, wet, ~200 m) | IRI "off-road/very poor" band (>12 m/km) | high wear (humidity+rough off-road) |
 | **cold_continental** | Köppen **Dfb** cold-continental normals (cold winters, ~600 m) | IRI "fair paved" band (~4–6 m/km) | thermal-cycling hazard, mixed terrain |
 
+**Tier-2 broadens this to six regions (shipped in F5, ADR-018)** — two more
+contrasting deployments, same public-grounding rule:
+
+| Region | Climate grounding (public) | Terrain grounding (public) | Effect |
+|---|---|---|---|
+| **hot_desert_lowland** | Köppen **BWh** hot-desert normals (extreme heat, ~80 m) | IRI "poor unsealed" band (~6–9 m/km) | harshest thermal/filter load |
+| **alpine_subarctic** | Köppen **Dfc** subarctic normals (severe cold, ~3000 m) | IRI "rough mountain track" band (~8–11 m/km) | deep-cold starts + thin air + rough terrain |
+
 These are **documented plausibility from public climate-type / road-roughness
 references for a fictional operator** — never values copied from any private log
 (the ADR-011 private-boundary note holds). Concrete constants live in the config
 catalog (`src/can_telemetry_forge/config.py`).
+
+**Seasons (shipped in F5, ADR-018).** On top of each region's own curve, a run
+carries a named **season** — a configurable anomaly that moves the whole fleet's
+ambient baseline and tilts its hazards. The neutral `baseline` is the default; the
+others (`heatwave`, `cold_snap`, `wet_season`) are documented public-climate-anomaly
+classes and are the knob a future **drift demo** (the 4th vitrine) shifts. A season
+sets an `ambient_delta_c`, a `wear_mult`, and per-failure-mode hazard multipliers;
+it is recorded in `manifest.json`.
 
 ---
 
@@ -200,6 +218,11 @@ sustained abnormal signal conditions, modified by the unit's environment. The la
 records both the **horizon** (`failure_within_h`, with `h` configurable) and the
 **mode** (so consumers can do per-mode evaluation). Hazard → event sampling is
 seeded.
+
+**Tier-2 hazard modifiers (F5, ADR-018).** Each mode's hazard is further scaled by a
+per-mode multiplier = the unit's **equipment-model** reliability × the run's
+**season**, combined multiplicatively. A failure-prone make in a heatwave fails
+sooner than a robust make in a mild baseline — still derived in this one place.
 
 **Derived in exactly one place** so the generator and any downstream consumer agree
 on the ground truth.
@@ -236,16 +259,29 @@ Adding them is a new registry entry + a new `anomaly_type` value — no schema c
 
 ---
 
-## 9. Diversity (Tier 2)
+## 9. Diversity (Tier 2 — shipped, F5)
 
-- **Regions / climate / terrain**: the §6 modifiers, broadened to a richer set of
-  contrasting international environments; a heatwave / cold-snap / wet-season
-  modifier is what a future **drift demo** shifts.
-- **Equipment models**: distinct baseline profiles and per-mode failure hazards per
-  model; optional move to per-model SPN whitelists (§4).
-- **Seasonality**: duty-cycle and ambient seasonal curves.
+Tier-2 is implemented as **declarative catalog entries that resolve to
+multipliers/offsets** over the existing pipeline — no new readings-schema columns
+(ADR-018).
+
+- **Regions / climate / terrain** ✅: the §6 modifiers, broadened to **six**
+  contrasting international environments (two new in F5).
+- **Equipment models** ✅: each `EquipmentModel` carries **per-mode failure-hazard
+  multipliers** and small **baseline signature offsets** (so one class hosts a
+  robust and a failure-prone make), plus an optional **per-model capability floor**
+  (`build_year_min`) — a first step toward the per-model SPN whitelist of §4.
+  Surfaced as an `equipment_models` dimension table + `units.model_id`.
+- **Seasonality** ✅: a named, configurable **season** (`heatwave` / `cold_snap` /
+  `wet_season`, on top of `baseline`) shifting ambient + wear + per-mode hazards —
+  the knob a future **drift demo** shifts (§6).
 - **Intentionally richer than "Brazilian states"**: a fictional international
-  operator with genuinely distinct regional climates, terrains, and contracts.
+  operator with genuinely distinct regional climates, terrains, contracts, and
+  equipment makes.
+
+The model × season hazard multipliers **compose multiplicatively** into the single
+per-mode factor `derive_unit_labels` applies (§7), so the failure label stays
+derived in one place.
 
 ---
 

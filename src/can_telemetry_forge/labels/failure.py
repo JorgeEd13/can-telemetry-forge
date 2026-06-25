@@ -140,20 +140,27 @@ def derive_unit_labels(
     step_hours: float,
     horizon_h: float,
     rng: np.random.Generator,
+    hazard_mult: dict[str, float] | None = None,
 ) -> UnitLabels:
     """Derive the multi-mode failure label for one unit (single source of truth).
 
     Samples one candidate failure time per mode from its hazard, takes the earliest
     across modes as the unit's event, and marks the ``horizon_h`` hours of rows
     leading up to it as ``failure_within_h = 1`` with the winning ``failure_mode``.
+
+    ``hazard_mult`` (Tier-2, F5) is an optional per-mode multiplier — the unit's
+    equipment-model reliability × the run's season — applied to each mode's hazard
+    before sampling. Missing modes default to ``1.0``, so an empty/None map
+    reproduces the F2 behaviour exactly.
     """
     n = wear.shape[0]
     hazards = _mode_hazards(signals, wear)
+    mult = hazard_mult or {}
 
     best_index: int | None = None
     best_mode = NO_FAILURE
     for mode in FAILURE_MODES:
-        idx = _sample_event(hazards[mode], step_hours, rng)
+        idx = _sample_event(hazards[mode] * mult.get(mode, 1.0), step_hours, rng)
         if idx is not None and (best_index is None or idx < best_index):
             best_index, best_mode = idx, mode
 

@@ -419,3 +419,51 @@ detail a reader hits too):
    CC-BY 4.0), and skips any mapped column the chosen mirror doesn't carry. Verified
    live: synthetic vs VED histogram overlap **0.48 (engine RPM) / 0.51 (engine load)**
    over 200k VED rows — plausible for the shared channels, as framed.
+
+---
+
+## ADR-018 — Tier-2 diversity: equipment models and seasons as declarative catalog entries (modifiers, not new schema)
+
+**Context.** F5's Tier-2 goal (ROADMAP/DATA_DESIGN §9) is to deepen realism along
+three axes — more contrasting **regions/climate**, distinct **equipment models**
+with their own reliability/signature, and configurable **seasonality** (the knob a
+future drift demo, the 4th vitrine, will shift). The open question was *where* this
+diversity lives: as new generator code per axis, or as data the existing engine
+reads. The same lens as ADR-012/-016 applies — this engine should generalise, so
+new realism should be **catalog, not code**.
+
+**Decision.** Both new axes are **declarative catalog entries** that resolve to
+**multipliers/offsets** over the existing pipeline; **no new readings-schema
+columns** and no new generator stages.
+
+- *Equipment model* (`EquipmentModel`) sits between vehicle class and unit: a
+  per-failure-mode **hazard multiplier** (so one class hosts a robust and a
+  failure-prone model) plus small **baseline signature offsets** (coolant °C / oil
+  kPa / vibration mm/s) added *inside* the documented J1939-range clamp, and an
+  optional per-model `build_year_min` capability floor (a model that only ever
+  shipped Modern hardware — a first step toward DATA_DESIGN §4's per-model SPN
+  whitelist). `build_fleet` assigns each unit a model uniform over its class's
+  models; a class with no catalogued models keeps a single generic (`model_id=""`)
+  profile, so the feature is purely additive.
+- *Season* (`Season`) is one run-level modifier: a constant `ambient_delta_c` on
+  every unit's ambient curve, a `wear_mult` on accumulated-wear hazard, and a
+  per-mode `hazard_mult`. The neutral `baseline` is the default; `heatwave` /
+  `cold_snap` / `wet_season` are named presets, and a season may also be defined
+  inline. Selected by `--season` / config (`resolve_season`).
+- The two hazard multipliers (model reliability × season) **compose
+  multiplicatively** (`_merge_hazard_mults`) into the single per-mode factor the
+  existing `derive_unit_labels` applies — the failure label stays derived in *one*
+  place (ADR-009).
+
+**Consequences.** Diversity grows by editing the catalog, not the generator;
+determinism (ADR-005) and the closed readings schema are untouched. Provenance
+holds (ADR-010/-014, [[can_forge_private_grounding_boundary]]): the two new regions
+cite public Köppen/IRI source classes, and models/seasons are documented
+plausibility for the fictional operator — never a real spec sheet or log. New
+**dimension** surfaces only: an `equipment_models` table (with a nullable-int
+`build_year_min` so "no floor" is NULL, not 0) and a `units.model_id` column; the
+run's season is echoed in `manifest.json`. The default fleet grows from 106 to ~134
+units (two new contracts). Tier-3 **CAN-frame faults** remain deferred to **F6**:
+they need a frame-level encoder (the inert PGNs of ADR-013 are the seam), which is a
+substantial standalone build — and, per ADR-016, will land as a new `anomaly_type`
+*value*, still no schema change.
