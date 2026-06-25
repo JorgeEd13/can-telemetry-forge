@@ -107,7 +107,7 @@ present, `is_outlier` exactly = the four value-distorting types.
 
 ---
 
-## F4 — Distribution validation  ☐
+## F4 — Distribution validation  ✅
 
 **Objective.** Show the generated distributions are plausible against real-world
 data — without shipping anyone's data.
@@ -118,6 +118,23 @@ emits a self-contained report. Public data fetched at run time, never committed.
 
 **DoD.** Validation report reproducible from a documented command; license note in
 README and an ADR; CI does not require the external data (validation is opt-in).
+
+**Shipped.** `validation/` package (outside `src/` — the core never imports it) as a
+**declarative registry of reference adapters** (ADR-017, mirroring ADR-012/-016):
+`reference.py` (the `ReferenceAdapter` registry + `run_validation` orchestrator),
+`compare.py` (pure summary-stat + **histogram-intersection** overlap, NumPy-only),
+`report.py` (self-contained Markdown report). Three adapters: **`in_spec`** (offline
+— values inside documented J1939 ranges), **`golden`** (offline — mean/std match a
+*recomputed* pinned reference run, catching generator drift; nothing committed), and
+**`ved`** (opt-in — overlap vs the **Vehicle Energy Dataset**, Kaggle **CC-BY 4.0**,
+fetched at run time via the Kaggle API, **never committed**, degrades gracefully when
+offline). Offline adapters always run so `forge validate` is reproducible-by-anyone
+and CI-safe; `--dataset ved` layers the real-data comparison on top. Real `forge
+validate --config --seed --report --dataset` wired over the library; `kaggle` is a
+`validate`-extra dep only. **16 new offline tests (89 total green)** — the VED path
+is tested via a fake-local-CSV (overlap math) and its graceful-unavailable branch,
+never hitting the network in CI; `forge validate` writes UTF-8 so the report renders
+on a legacy-codepage console.
 
 ---
 

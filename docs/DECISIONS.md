@@ -345,3 +345,55 @@ as a back-compat alias). `sensor_dropout` is the one family that blanks a value 
 the `is_outlier` rollup — documented so the rollup stays meaningful. Sensor faults
 are **segment-based** (contiguous episodes), which is how real transducers fail and
 gives downstream models temporal structure to learn, unlike per-cell salt.
+
+---
+
+## ADR-017 — Distribution validation: a pluggable reference registry; offline always, VED opt-in (CC-BY 4.0, never committed)
+
+**Context.** F4's job (ROADMAP) is to show the generated distributions are
+*plausible* against real-world data **without shipping anyone's data** (ADR-003). Two
+questions had to be settled with the user: **(1) against what reference?** and
+**(2) how does the external dataset stay reproducible and CI-safe** given that any
+real CAN/OBD dataset is license-encumbered and/or auth-gated?
+
+A real-data comparison is the strongest "vs reality" story, but if `forge validate`
+*requires* a network fetch it stops being reproducible-by-anyone and can't run in
+CI. Conversely, an offline-only check can't claim resemblance to real telemetry. The
+chosen public set — the **Vehicle Energy Dataset (VED)**, Kaggle, **CC-BY 4.0** — is
+permissive and attributable but is **light-vehicle OBD-II, not heavy J1939**, so only
+the engine-core channels (RPM, engine load, fuel rate, coolant temp) overlap.
+
+**Decision.**
+
+*Validation is a declarative registry of reference adapters* (`validation/`,
+outside `src/` — the core never imports it), mirroring the signal/anomaly registries
+(ADR-012/-016). Each adapter is self-describing (`name`, `description`, a `network`
+flag, a `check` fn → per-signal comparisons + pass/fail checks). Three ship:
+
+- **`in_spec`** (offline) — every non-NULL value must sit inside its documented
+  J1939 range from the signal registry. Catches out-of-spec generation.
+- **`golden`** (offline) — per-signal mean/std must match a **recomputed** pinned
+  reference run (fixed seed/profile). The reference is *regenerated*, never stored as
+  data (determinism, ADR-005), so nothing is committed; it catches silent drift in
+  the generator itself.
+- **`ved`** (network, opt-in) — histogram-intersection overlap of the overlapping
+  engine channels vs VED, **fetched at run time via the Kaggle API and never
+  committed** (the cache dir is git-ignored). Degrades to "reference unavailable"
+  (never fakes a result) when offline or unauthenticated.
+
+*The offline adapters always run; `ved` only on `--dataset ved`.* So `forge
+validate` works with no network, is reproducible by anyone, and is CI-safe by
+construction — CI never has Kaggle creds and never requests `ved`. The deliverable is
+a self-contained Markdown report stating its own provenance.
+
+The overlap metric is **histogram intersection** on a shared bin grid (`sum(min(p,
+q))`): bounded `[0,1]`, symmetric, assumption-free, and explainable in one line for a
+portfolio report — over a KS/EMD statistic whose magnitude needs interpretation.
+
+**Consequences.** The "vs real data" claim is honest and bounded (VED overlap is a
+plausibility sanity-check on shared channels, *not* an equivalence claim, since VED
+isn't heavy-equipment J1939 — stated in the report). Adding a future reference (a
+heavier-duty public set, a synthetic baseline) is a local registry entry, not a
+rewrite. `kaggle` is a `validate`-extra dependency only; the core install and CI stay
+lean. The clean-room invariant (ADR-003) is preserved end to end: no real data is
+shipped, committed, or used as a seed — only fetched transiently to compare.

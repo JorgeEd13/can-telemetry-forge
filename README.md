@@ -7,7 +7,7 @@
 <p align="center"><em>Synthetic heavy-equipment telemetry, grounded in the J1939 standard — realistic predictive-maintenance data you can regenerate from a seed.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-F2%20MVP%20%E2%80%94%20Tier%201%20ships-success" alt="Status: F2 MVP — Tier 1 ships">
+  <img src="https://img.shields.io/badge/status-F4%20%E2%80%94%20validated%20distributions-success" alt="Status: F4 — validated distributions">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/data-100%25%20synthetic-blueviolet" alt="100% synthetic data">
   <img src="https://img.shields.io/badge/grounded-SAE%20J1939%20%2B%20physics-teal" alt="Grounded in SAE J1939 + physics">
@@ -35,9 +35,10 @@ detection) has something real to work on.
 > defects** (obvious + joint/contextual outliers and stuck/drift/dropout sensor
 > faults, each recoverable from an `anomaly_type` label), and tidy Parquet / CSV /
 > DuckDB tables plus a manifest and a generated data dictionary. Same config + seed →
-> byte-identical output. Still building phase by phase (see
-> [`docs/ROADMAP.md`](docs/ROADMAP.md)): distribution validation against a public
-> dataset (F4) and Tier-2/3 diversity (F5).
+> byte-identical output, and `forge validate` reports the distributions as plausible
+> (in-spec + drift-free offline, with an opt-in CC-BY real-data overlap). Still
+> building phase by phase (see [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2/3
+> diversity (F5).
 
 ## Why it's credible (and clean-room)
 
@@ -53,9 +54,10 @@ load, EGT rising at altitude, vibration rising with terrain and wear) come from
 asserted in tests** so they can't silently drift.
 
 - **No real telemetry is shipped or used as a seed.** A permissively-licensed
-  public CAN/OBD dataset may be used **only to validate** that the generated
-  distributions look plausible (license verified first, fetched at validation
-  time, never committed) — see [`docs/ROADMAP.md`](docs/ROADMAP.md) F4.
+  public CAN/OBD dataset is used **only to validate** that the generated
+  distributions look plausible — the **Vehicle Energy Dataset** (Kaggle,
+  **CC-BY 4.0**), fetched at validation time and **never committed** (`forge
+  validate --dataset ved`; see [F4](#validating-the-data-f4) and ADR-017).
 - **Reproducible by construction.** Every dataset regenerates from a config file +
   a fixed seed. Same seed → identical data.
 - **Clean room.** Built from the standard and known physics; contains no
@@ -124,6 +126,33 @@ whose regions are pinned to **cited public climate-type + road-roughness sources
 Everything the CLI does is callable as a library (`config → sim.simulate →
 io.write_dataset`), so the future MLOps repo can import it directly.
 
+## Validating the data (F4)
+
+`forge validate` checks that the generated distributions are **plausible** and emits
+a self-contained Markdown report. It runs two **offline** reference adapters by
+default — so it needs no network and is reproducible by anyone:
+
+- **`in_spec`** — every value sits inside its documented SAE J1939 range.
+- **`golden`** — per-signal summary stats match a pinned, *recomputed* reference run
+  (catches silent drift in the generator itself — nothing is committed).
+
+```bash
+# Offline plausibility report to stdout (or --report report.md):
+forge validate --seed 42
+
+# Opt into a real-data comparison (Vehicle Energy Dataset, CC-BY 4.0):
+pip install -e '.[validate]'
+forge validate --seed 42 --dataset ved --report report.md
+```
+
+The optional `ved` adapter overlaps the shared engine channels (RPM, engine load,
+fuel rate, coolant temp) against the **[Vehicle Energy Dataset](https://www.kaggle.com/datasets/saurabhshahane/vehicle-energy-dataset)**
+(Kaggle, **CC-BY 4.0**), **fetched at run time via the Kaggle API and never
+committed**. VED is light-vehicle OBD-II, so the overlap is a *plausibility
+sanity-check on shared channels, not an equivalence claim* — stated plainly in the
+report. CI never requests it and the offline checks always stand on their own
+(rationale in [ADR-017](docs/DECISIONS.md)).
+
 ## Data tiers
 
 Richness is sequenced so the repo ships fast and grows on a roadmap (full spec in
@@ -145,7 +174,7 @@ Richness is sequenced so the repo ships fast and grows on a roadmap (full spec i
 | **F1** | J1939-grounded signal model + data dictionary ✅ |
 | **F2** | Fleet simulator + Parquet/CSV/DuckDB writers — **Tier 1 ships (MVP)** ✅ |
 | **F3** | Labeled anomaly & sensor-fault injection (declarative injector registry) ✅ |
-| **F4** | Distribution validation vs a license-checked public dataset |
+| **F4** | Distribution validation vs a license-checked public dataset (offline in-spec/golden + opt-in CC-BY VED overlap) ✅ |
 | **F5** | Diversity (Tier 2) + richer faults (Tier 3) |
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for objectives and definitions of done,

@@ -1,20 +1,21 @@
 # State — can-telemetry-forge
 
-Updated: 2026-06-23
+Updated: 2026-06-25
 
 ## Current focus
 
-**F3 is done — the labeled anomaly/fault layer is complete.** The anomaly layer is
-now a **declarative injector registry** (ADR-016, the same philosophy as the signal
-registry ADR-012): three defect families — obvious outliers, joint/contextual
-outliers, and segment-based sensor faults (stuck/drift/dropout) — each a
-self-describing injector. `forge generate` emits a single open-vocabulary
-`anomaly_type` categorical + `anomaly_signal`, with `is_outlier` kept as a
-value-distortion rollup; every defect is recoverable from labels, era-`NULL` cells
-are never touched, and at most one defect lands per cell. Next is **F4 —
-distribution validation** (a `validate` command comparing generated distributions to
-a license-checked public dataset, fetched at run time, never committed), then **F5**
-(Tier-2 diversity + Tier-3 CAN-frame faults).
+**F4 is done — distribution validation ships.** `forge validate` is real (no longer
+a stub): a `validation/` package (outside `src/` — the core never imports it) built
+as a **declarative registry of reference adapters** (ADR-017, mirroring ADR-012/-016).
+Two **offline** adapters always run — `in_spec` (values inside documented J1939
+ranges) and `golden` (per-signal mean/std match a *recomputed* pinned reference run,
+catching generator drift; nothing committed) — so the command is reproducible by
+anyone and CI-safe. A third **opt-in** adapter `ved` overlaps the shared engine
+channels against the **Vehicle Energy Dataset** (Kaggle, **CC-BY 4.0**) via
+histogram intersection, **fetched at run time through the Kaggle API and never
+committed**; it degrades to "unavailable" offline. Output is a self-contained
+Markdown report. `kaggle` is a `validate`-extra dep only. Next is **F5** (Tier-2
+diversity + Tier-3 CAN-frame faults).
 
 ## Done
 
@@ -70,15 +71,38 @@ a license-checked public dataset, fetched at run time, never committed), then **
   - **14 new offline tests (73 total green.)** Verified e2e (20-day/5-min, seed 5):
     all five families present; `n_outlier_rows` == obvious+joint+stuck+drift
     (dropout excluded, as documented).
+- **F4 — Distribution validation (reference-adapter registry):**
+  - `validation/` package (outside `src/`): `reference.py` (the `ReferenceAdapter`
+    registry + `run_validation` orchestrator + `ValidationRun`), `compare.py` (pure
+    NumPy summary stats + **histogram-intersection** overlap), `report.py`
+    (self-contained Markdown report).
+  - Adapters: `in_spec` (offline, J1939 range check), `golden` (offline, mean/std vs
+    a *recomputed* pinned reference run — drift guard, nothing committed), `ved`
+    (opt-in, Kaggle CC-BY-4.0 Vehicle Energy Dataset overlap, fetched at run time,
+    never committed, degrades gracefully offline).
+  - `cli.py`: real `forge validate --config --seed --report --dataset` over the
+    library; offline adapters always run (CI-safe), `--dataset ved` opts into the
+    network fetch. `pyproject` `validate` extra adds `kaggle`; `pytest` pythonpath
+    gains `"."` so `import validation` resolves in tests.
+  - ADR-017 recorded; ROADMAP F4 ✅; README "Validating the data (F4)" + CC-BY note.
+  - **16 new offline tests (89 total green).** VED tested via a fake-local-CSV (the
+    overlap math) + its graceful-unavailable branch — never hits the network in CI.
+  - Hardening from building it: `in_spec` masks injected defects via the row-level
+    `is_outlier` rollup (a row can distort >1 signal but label only one — ADR-016);
+    `golden` is a config-independent drift guard (recomputed golden run in-spec; the
+    fleet-derived runtime/age fields excluded since their aggregate moves with the
+    seed); the opt-in VED fetch catches **BaseException** (recent `kaggle` raises
+    `SystemExit` at import when unauthenticated) so it degrades, never crashes the
+    run; report printed as UTF-8 (cp1252-console safe). Tests use tiny fleet configs
+    so each `run_validation` simulates sub-second.
 
 ## Next step (concrete)
 
-**F4 — Distribution validation.** A `validation/` script + a real `forge validate`
-implementation (currently a stub) that compares the generated distributions against
-a **license-checked** public CAN/OBD/J1939 dataset (histograms, summary stats) and
-emits a self-contained report. Public data is fetched at run time, **never
-committed**, and **CI must not require it** (validation is opt-in). DoD: report
-reproducible from a documented command; license note in README + an ADR.
+**F5 — Diversity (Tier 2) & richer faults (Tier 3).** Broaden regions/climate/season
+and equipment models with distinct failure profiles (Tier 2); add the trickier
+fault patterns (the Tier-3 **CAN-frame faults** land once a frame-level encoder
+exists — the inert PGNs of ADR-013 are the seam). All config-driven, labeled, seeded;
+update DATA_DESIGN to reflect what ships.
 
 ## Notes
 

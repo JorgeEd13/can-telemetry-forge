@@ -299,6 +299,8 @@ These are settled; remaining specifics get committed during F1/F2.
   per-contract sizes drawn around an expected value).
 - ~~Which public regional/climate/road-quality sources to cite~~ → done (F2,
   ADR-014: Köppen climate types + IRI road-roughness bands; see §6).
-- Which public CAN/OBD/J1939 dataset to validate distributions against (license
-  check — F4).
+- ~~Which public CAN/OBD/J1939 dataset to validate distributions against (license
+  check — F4)~~ → done (F4, ADR-017): the **Vehicle Energy Dataset** (Kaggle,
+  CC-BY 4.0), opt-in `forge validate --dataset ved`, fetched at run time, never
+  committed; offline `in_spec`/`golden` adapters always run.
 - Finer per-region climate normals / per-model SPN whitelists (Tier 2 — F5).

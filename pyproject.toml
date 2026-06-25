@@ -36,8 +36,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 # Validation-only — distribution checks against a license-checked public dataset
-# (ROADMAP F4). Kept out of the core runtime deps so the library + CI stay lean.
-validate = ["matplotlib>=3.7"]
+# (ROADMAP F4 / ADR-017). Kept out of the core runtime deps so the library + CI
+# stay lean. ``kaggle`` is only needed for the opt-in ``--dataset ved`` fetch;
+# the offline adapters (in_spec, golden) need nothing beyond the core.
+validate = ["kaggle>=1.6", "matplotlib>=3.7"]
 
 [project.scripts]
 forge = "can_telemetry_forge.cli:main"
@@ -46,5 +48,7 @@ forge = "can_telemetry_forge.cli:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+# "src" for the installable package; "." so the opt-in ``validation/`` package
+# (deliberately outside src/ — the core never imports it) is importable in tests.
+pythonpath = ["src", "."]
 testpaths = ["tests"]
