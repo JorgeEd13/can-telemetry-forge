@@ -289,58 +289,128 @@ def _check_golden(readings: pd.DataFrame, units: dict[str, str]) -> ReferenceRes
 # Maps our J1939 signal name → the VED (Vehicle Energy Dataset) column carrying the
 # comparable OBD-II quantity. VED is light-vehicle OBD-II, so only the engine-core
 # channels overlap; the rest of our Tier-1 set has no VED counterpart and is simply
-# summarised without an overlap score. (Column names follow the public VED schema.)
+# summarised without an overlap score. Column names follow the published VED
+# "segregated/combustion-master" schema. A column missing from the chosen handle is
+# skipped (so a different VED mirror with different names just compares fewer channels).
 _VED_COLUMN_MAP: dict[str, str] = {
-    "engine_speed_rpm": "Engine RPM[RPM]",
-    "engine_load_pct": "Absolute Load[%]",
-    "fuel_rate_lph": "Fuel Rate[L/hr]",
-    "coolant_temp_c": "Engine Coolant Temperature[DegC]",
+    "engine_speed_rpm": "Engine_RPM_RPM",
+    "engine_load_pct": "Absolute_Load_pct",
 }
+
+# Only read the columns we actually compare (the VED master CSV is ~500 MB; reading a
+# couple of columns keeps the opt-in check light). Mass-air-flow is pulled too as a
+# documented load/fuel proxy for the report's context, even though we don't score it.
+_VED_USECOLS: tuple[str, ...] = ("Engine_RPM_RPM", "Absolute_Load_pct", "MAF_g_per_sec")
+
+# Read at most this many rows from the VED master for the distribution sample — plenty
+# for a stable histogram while keeping the parse fast on the multi-hundred-MB file.
+_VED_SAMPLE_ROWS = 200_000
 
 _VED_MIN_OVERLAP = 0.30  # a generous floor — VED is light-vehicle, not heavy J1939
 
 
-def _load_ved_frame(cache_dir: Path) -> pd.DataFrame:
-    """Fetch (if needed) and load the VED dataset from the run-time cache.
+# The Kaggle dataset handle (``owner/slug``) the ved adapter compares against.
+# Configurable on purpose (a single hardcoded handle rots — datasets get renamed /
+# removed): overridable via ``--ved-handle`` / the ``ved_handle`` config, or the
+# ``FORGE_VED_HANDLE`` env var. The default is a **verified** published VED mirror
+# whose "combustion master" CSV carries the OBD-II columns in ``_VED_COLUMN_MAP``.
+DEFAULT_VED_HANDLE = "yashseth25/ved-segregated"
 
-    Downloads the CC-BY-4.0 Vehicle Energy Dataset via the Kaggle API into
-    ``cache_dir`` the first time, then reads the cached copy. The data is **never
-    committed** (the cache dir is git-ignored, ADR-017). Raises on any failure so
-    the orchestrator can degrade to "reference unavailable" instead of pretending.
+# The classic Kaggle REST endpoint. We hit it directly with HTTP Basic auth from the
+# legacy ``~/.kaggle/kaggle.json`` (username + key): the newer ``kaggle``/``kagglehub``
+# SDKs route through ``api.kaggle.com`` and can 403 behind TLS-inspecting proxies,
+# whereas this documented endpoint authorizes dataset downloads reliably (ADR-017).
+_KAGGLE_REST = "https://www.kaggle.com/api/v1"
+
+
+def _resolve_ved_handle(handle: str | None) -> str:
+    import os
+
+    return handle or os.environ.get("FORGE_VED_HANDLE") or DEFAULT_VED_HANDLE
+
+
+def _kaggle_basic_auth() -> tuple[str, str]:
+    """(username, key) from ``~/.kaggle/kaggle.json``. Raises if absent/malformed."""
+    import json
+
+    creds = json.loads((Path.home() / ".kaggle" / "kaggle.json").read_text(encoding="utf-8"))
+    return creds["username"], creds["key"]
+
+
+def _download_ved_zip(handle: str, dest_zip: Path) -> None:
+    """Stream the dataset zip from the classic REST endpoint into ``dest_zip``.
+
+    Uses ``requests`` (a ``kagglehub`` transitive dep) with HTTP Basic auth, following
+    the 302 to storage. Never committed — ``dest_zip`` lives in the git-ignored cache.
     """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    csvs = sorted(cache_dir.glob("*.csv"))
-    if not csvs:
-        # Opt-in network fetch. Import lazily so the package imports with no kaggle.
-        # NOTE: recent kaggle versions perform auth at *import* time and may emit a
-        # banner / raise SystemExit when no credentials exist; the caller catches
-        # BaseException so that degrades to "unavailable" rather than killing the run.
-        import kaggle  # type: ignore[import-not-found]
+    import requests  # transitive via the [validate] extra; lazy import keeps core lean
 
-        kaggle.api.authenticate()
-        kaggle.api.dataset_download_files(
-            "saurabhshahane/vehicle-energy-dataset",
-            path=str(cache_dir),
-            unzip=True,
-        )
-        csvs = sorted(cache_dir.glob("*.csv"))
-    if not csvs:
-        raise FileNotFoundError(f"no VED CSV found in {cache_dir} after fetch")
-    # VED ships per-trip CSVs; one representative trip is enough for a distribution
-    # sanity-check and keeps the run light. Deterministic pick: the first by name.
-    return pd.read_csv(csvs[0])
+    user, key = _kaggle_basic_auth()
+    owner, slug = handle.split("/", 1)
+    url = f"{_KAGGLE_REST}/datasets/download/{owner}/{slug}"
+    with requests.get(url, auth=(user, key), timeout=600, stream=True) as r:
+        r.raise_for_status()
+        with dest_zip.open("wb") as fh:
+            for chunk in r.iter_content(1 << 18):
+                fh.write(chunk)
+
+
+def _read_ved_master(zip_path: Path) -> pd.DataFrame:
+    """Read the mapped columns from the largest combustion CSV inside ``zip_path``.
+
+    Only ``_VED_USECOLS`` (those present) and at most ``_VED_SAMPLE_ROWS`` rows are
+    read — the master CSV is hundreds of MB, but a couple of columns × a capped sample
+    is enough for a stable histogram and keeps the opt-in check fast.
+    """
+    import zipfile
+
+    with zipfile.ZipFile(zip_path) as z:
+        csvs = [n for n in z.namelist() if n.lower().endswith(".csv")]
+        if not csvs:
+            raise FileNotFoundError(f"no CSV inside {zip_path}")
+        # Prefer a combustion master if present (it carries the engine OBD columns).
+        member = next((n for n in csvs if "combustion" in n.lower()), csvs[0])
+        with z.open(member) as fh:
+            # Read the header to intersect usecols (a different mirror may differ).
+            header = pd.read_csv(fh, nrows=0).columns
+        present = [c for c in _VED_USECOLS if c in header]
+        with z.open(member) as fh:
+            return pd.read_csv(fh, usecols=present or None, nrows=_VED_SAMPLE_ROWS)
+
+
+def _load_ved_frame(cache_dir: Path, handle: str | None = None) -> pd.DataFrame:
+    """Fetch (if needed) and load the chosen VED dataset from the run-time cache.
+
+    Downloads the dataset zip via the classic Kaggle REST endpoint (legacy key) into
+    the git-ignored cache, then reads a capped sample of the mapped engine columns.
+    The CC-BY-4.0 data is **never committed** (ADR-017). A previously-cached zip
+    short-circuits the network. Raises on total failure so the orchestrator can
+    degrade to "reference unavailable" instead of pretending.
+    """
+    resolved = _resolve_ved_handle(handle)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    slug = resolved.replace("/", "__")
+    zip_path = cache_dir / f"{slug}.zip"
+    if not zip_path.exists():
+        _download_ved_zip(resolved, zip_path)
+    return _read_ved_master(zip_path)
 
 
 def _check_ved(
-    readings: pd.DataFrame, units: dict[str, str], *, cache_dir: Path = _CACHE_DIR
+    readings: pd.DataFrame,
+    units: dict[str, str],
+    *,
+    cache_dir: Path = _CACHE_DIR,
+    handle: str | None = None,
 ) -> ReferenceResult:
     """Histogram overlap of the overlapping engine channels vs real VED OBD-II data."""
+    resolved = _resolve_ved_handle(handle)
     description = (
-        "Distribution overlap vs the Vehicle Energy Dataset (Kaggle, CC-BY 4.0), "
-        "fetched at run time, never committed."
+        f"Distribution overlap vs the Vehicle Energy Dataset (Kaggle `{resolved}`, "
+        "CC-BY 4.0), fetched at run time, never committed."
     )
     try:
-        ved = _load_ved_frame(cache_dir)
+        ved = _load_ved_frame(cache_dir, handle=resolved)
     except BaseException as exc:  # noqa: BLE001 - opt-in: degrade, never crash the run
         # BaseException (not just Exception) on purpose: the kaggle client can raise
         # SystemExit at import/auth time when unauthenticated. This adapter is opt-in
@@ -429,13 +499,16 @@ def run_validation(
     *,
     datasets: Sequence[str] = (),
     cache_dir: Path = _CACHE_DIR,
+    ved_handle: str | None = None,
 ) -> ValidationRun:
     """Validate a generated run. Offline adapters always run; ``datasets`` opts into
     network adapters (currently ``"ved"``).
 
     ``config`` defaults to the bundled :func:`default_config`. Generation is the
     same library path the CLI uses, so what is validated is exactly what
-    ``forge generate`` produces.
+    ``forge generate`` produces. ``ved_handle`` overrides the Kaggle dataset handle
+    the ``ved`` adapter compares against (else ``FORGE_VED_HANDLE`` /
+    :data:`DEFAULT_VED_HANDLE`).
     """
     config = (config or default_config()).validate()
     ds = simulate(config)
@@ -453,7 +526,9 @@ def run_validation(
         if not adapter.network:
             continue  # offline adapters already ran
         if name == "ved":
-            results.append(_check_ved(ds.readings, units, cache_dir=cache_dir))
+            results.append(
+                _check_ved(ds.readings, units, cache_dir=cache_dir, handle=ved_handle)
+            )
         else:  # pragma: no cover - future network adapters
             results.append(adapter.check(ds.readings, units))
 
@@ -468,6 +543,7 @@ __all__ = [
     "REFERENCE_ADAPTERS",
     "OFFLINE_ADAPTERS",
     "GOLDEN_PROFILE",
+    "DEFAULT_VED_HANDLE",
     "get_adapter",
     "run_validation",
 ]

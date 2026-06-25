@@ -37,9 +37,11 @@ dependencies = [
 dev = ["pytest>=7"]
 # Validation-only — distribution checks against a license-checked public dataset
 # (ROADMAP F4 / ADR-017). Kept out of the core runtime deps so the library + CI
-# stay lean. ``kaggle`` is only needed for the opt-in ``--dataset ved`` fetch;
-# the offline adapters (in_spec, golden) need nothing beyond the core.
-validate = ["kaggle>=1.6", "matplotlib>=3.7"]
+# stay lean. The opt-in ``--dataset ved`` fetch downloads via the classic Kaggle REST
+# endpoint with HTTP Basic auth from ``~/.kaggle/kaggle.json`` (the bundled SDKs route
+# through api.kaggle.com and can 403 behind TLS-inspecting proxies), so it needs only
+# ``requests``. The offline adapters (in_spec, golden) need nothing beyond the core.
+validate = ["requests>=2.28", "matplotlib>=3.7"]
 
 [project.scripts]
 forge = "can_telemetry_forge.cli:main"

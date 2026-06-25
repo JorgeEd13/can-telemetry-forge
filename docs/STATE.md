@@ -95,6 +95,17 @@ diversity + Tier-3 CAN-frame faults).
     `SystemExit` at import when unauthenticated) so it degrades, never crashes the
     run; report printed as UTF-8 (cp1252-console safe). Tests use tiny fleet configs
     so each `run_validation` simulates sub-second.
+  - **VED fetch verified LIVE (2026-06-25).** Real overlap ran end-to-end: synthetic
+    vs VED histogram intersection **0.48 (engine RPM) / 0.51 (engine load)** over 200k
+    VED rows → all ved checks pass. Three run-time realities (ADR-017 addendum):
+    Kaggle's new SDKs 403 on dataset downloads → fetch the **classic REST endpoint**
+    (`www.kaggle.com/api/v1`) with **HTTP Basic auth** from `~/.kaggle/kaggle.json`
+    (only `requests` needed, SDKs dropped from the extra); Norton TLS interception →
+    `pip-system-certs` (Windows trust store, not verify=False); the **VED handle is
+    configurable** (`--ved-handle`/`FORGE_VED_HANDLE`/config, default verified
+    `yashseth25/ved-segregated`) because the originally-assumed handle didn't exist.
+    The 510 MB zip lands in the git-ignored cache, read capped (200k rows × mapped
+    cols), never committed.
 
 ## Next step (concrete)
 
