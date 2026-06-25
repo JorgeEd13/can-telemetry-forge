@@ -218,6 +218,10 @@ class ForgeConfig:
     obvious_outlier_rate: float | None = None  # back-compat alias for anomaly_rates["obvious_outlier"]
     anomaly_rates: dict[str, float] = field(default_factory=lambda: dict(DEFAULT_ANOMALY_RATES))
     season: Season = field(default_factory=lambda: SEASONS["baseline"])  # Tier-2 (F5)
+    # Emit the byte-level corrupted CAN frames as a `can_frames` side table (F6,
+    # ADR-019). Off by default — the decoded readings are the product; the raw frames
+    # are an opt-in artifact for byte-level QA/teaching. Only frame-fault cells appear.
+    emit_raw_frames: bool = False
     seed: int = 42
 
     def resolved_anomaly_rates(self) -> dict[str, float]:
@@ -582,7 +586,8 @@ def config_from_dict(d: dict) -> ForgeConfig:
     top = {
         k: v
         for k, v in d.items()
-        if k in {"days", "resolution", "failure_horizon_h", "obvious_outlier_rate", "seed"}
+        if k in {"days", "resolution", "failure_horizon_h", "obvious_outlier_rate",
+                 "emit_raw_frames", "seed"}
     }
     # anomaly_rates merges onto the defaults (a small file can tweak one type).
     if "anomaly_rates" in d:

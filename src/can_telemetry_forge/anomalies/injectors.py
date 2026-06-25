@@ -260,7 +260,13 @@ def _make_sensor_injector(kind: str) -> AnomalyInjector:
 # Order matters: earlier injectors claim cells first (the orchestrator masks them
 # off for later ones), so at most one anomaly_type lands per cell. Obvious/joint
 # outliers (per-cell) run before sensor faults (segments) so a rare point spike
-# never silently overwrites a labeled fault segment.
+# never silently overwrites a labeled fault segment. The CAN-frame faults (F6,
+# transport layer) run last — they corrupt the *encoded* frame, a distinct fault
+# class from the value/transducer defects above.
+
+# Imported here (not at module top) to avoid a cycle: frame_faults imports
+# ``_fault_segments`` from this module.
+from .frame_faults import FRAME_INJECTORS  # noqa: E402
 
 INJECTORS: tuple[AnomalyInjector, ...] = (
     AnomalyInjector(
@@ -276,6 +282,7 @@ INJECTORS: tuple[AnomalyInjector, ...] = (
     _make_sensor_injector(SENSOR_STUCK),
     _make_sensor_injector(SENSOR_DRIFT),
     _make_sensor_injector(SENSOR_DROPOUT),
+    *FRAME_INJECTORS,
 )
 
 INJECTOR_BY_TYPE: dict[str, AnomalyInjector] = {inj.anomaly_type: inj for inj in INJECTORS}

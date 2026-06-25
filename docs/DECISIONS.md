@@ -467,3 +467,57 @@ units (two new contracts). Tier-3 **CAN-frame faults** remain deferred to **F6**
 they need a frame-level encoder (the inert PGNs of ADR-013 are the seam), which is a
 substantial standalone build — and, per ADR-016, will land as a new `anomaly_type`
 *value*, still no schema change.
+
+---
+
+## ADR-019 — Tier-3 CAN-frame faults: a frame-level codec on `SignalSpec`, faults decode back, raw frames are an opt-in artifact
+
+**Context.** F6 (ROADMAP, DATA_DESIGN §8) is the corruption class that only exists
+once a signal is an actual **J1939 frame**: a bad byte, a stale re-send, a J1939
+error/not-available code, a short DLC. ADR-013 recorded each signal's PGN but left it
+**inert** — generation emits engineering-unit time-series, not frames — precisely so
+this phase wouldn't have to re-research the standard. Three choices were open (the
+load-bearing ones taken with Jorge): *where the byte/bit layout lives*; *how a
+frame-level fault surfaces in a tidy engineering-unit table*; and *which fault
+families ship*.
+
+**Decision.**
+
+- **Layout lives on `SignalSpec`** (not a parallel registry). A frozen `FrameLayout`
+  (start bit, bit length, scale, offset, byte order, frame length) completes the
+  J1939 identity the spec already owns (SPN/PGN) — one source of truth, mirroring
+  ADR-012. The 8 bus signals carry one; the non-bus derived fields (runtime, age,
+  vibration add-on) don't. A test keeps the layouts well-formed (byte-aligned, fit
+  the frame).
+- **A real encoder/decoder** (`signals/frames.py`): `value → raw = round((v −
+  offset)/scale) → little-endian frame bytes`, and back. J1939 sentinels are modeled
+  — the top two raw codes per field are reserved (a valid reading never collides with
+  them), an all-ones field is *not available*, and both the NA and error codes
+  **decode to `NULL`**. The codec **round-trips** every documented signal within one
+  quantum (tested).
+- **Faults are injected at the byte layer and decoded back** into the existing signal
+  column — exactly what a receiver observes — so the **dataset stays decoded and the
+  schema is unchanged** (ADR-016). Jorge also chose to **emit the raw frames as a
+  side artifact**: with `--emit-raw-frames` (`emit_raw_frames` config), the corrupted
+  frames (hex) go to an **opt-in `can_frames` dimension table**; the table is always
+  built (cheap — only frame-fault cells) but only persisted when asked. The decoded
+  `readings` remain the product.
+- **Four families ship**, each a new `anomaly_type` *value* (no new column) and a
+  registered `AnomalyInjector` running after the value/sensor families: `can_frame_corrupt`
+  (byte flip → implausible decode; value-distorting), `can_frame_stale` (segment
+  re-send → frozen value; a *transport* fault, distinct from `sensor_stuck`;
+  value-distorting), `can_frame_error_indicator` (error/NA code → `NULL`), and
+  `can_frame_truncated` (short DLC → field bits absent → `NULL`, distinct from
+  era-NULL and `sensor_dropout`).
+
+**Consequences.** The standards seam ADR-013 left is now active at near-zero added
+complexity to the value model: **the generators still never read `FrameLayout`** (the
+inert-PGN invariant is re-asserted by a test that strips every layout and checks the
+series are byte-identical). `is_outlier` becomes a true per-row rollup over all
+value-distorting cells — so a row can be flagged while a higher-priority NULL-blanking
+defect won its categorical (documented, tested); the strict label↔rollup equality of
+F3 is replaced by the directional invariant (a distorting *winning* label ⇒
+`is_outlier`). Determinism holds (one seeded child stream per injector, ADR-005);
+provenance holds (all layouts are published SAE J1939-71, no real frame is a seed).
+Tier-3 is complete — the project's anomaly contract now spans value, sensor, and
+transport-layer defects, all labeled and recoverable.

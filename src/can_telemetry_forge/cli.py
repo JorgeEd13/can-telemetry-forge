@@ -88,6 +88,15 @@ def build_parser() -> argparse.ArgumentParser:
             "a future drift demo shifts — moves ambient + tilts failure hazards."
         ),
     )
+    generate.add_argument(
+        "--emit-raw-frames",
+        action="store_true",
+        help=(
+            "also write a `can_frames` table of the byte-level corrupted J1939 frames "
+            "behind each CAN-frame fault (Tier-3, F6). Off by default — the decoded "
+            "readings are the product; this is an opt-in byte-level artifact."
+        ),
+    )
 
     # `forge validate` — distribution validation (F4, opt-in).
     validate = subparsers.add_parser(
@@ -142,6 +151,8 @@ def _run_generate(args: argparse.Namespace) -> int:
         overrides["resolution"] = args.resolution
     if args.season is not None:
         overrides["season"] = resolve_season(args.season)
+    if args.emit_raw_frames:
+        overrides["emit_raw_frames"] = True
     if overrides:
         config = replace(config, **overrides).validate()
 

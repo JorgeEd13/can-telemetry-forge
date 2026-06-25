@@ -28,9 +28,10 @@ model year and gate the schema; an unsupported signal is emitted as **NULL
 ## Signals
 
 `Era` = the era that introduces the signal (and every later era reports it).
-The **PGN** column is recorded from J1939 but **inert by default** (ADR-013): the
-generator emits engineering-unit time-series, not raw CAN frames, so the PGN is
-captured for a future frame-level encoder, not used in generation yet.
+The **PGN** column was recorded inert in F1 (ADR-013); F6 (ADR-019) activated it with
+a `FrameLayout` (byte/bit placement + scaling/offset, see "Frame layout" below), used
+by the frame encoder/decoder and the Tier-3 CAN-frame faults. The value *generators*
+still emit engineering-unit time-series and don't read the layout.
 
 | Field | SPN | PGN (inert) | Unit | Range | J1939 scaling | Era | Driven by |
 |---|---|---|---|---|---|---|---|
@@ -49,6 +50,28 @@ captured for a future frame-level encoder, not used in generation yet.
 > `vibration_mms` has no single standardised broadcast SPN (it is a modern
 > telematics add-on, not a core J1939-71 engine parameter); it is included as a
 > Modern-era signal because predictive-maintenance fleets commonly add it.
+
+## Frame layout (J1939 byte/bit placement — F6, ADR-019)
+
+The **bus signals** carry a `FrameLayout` describing where the SPN sits in its PGN
+frame and how a raw integer maps to the engineering value
+(`value = raw × scale + offset`, little-endian). The frame encoder/decoder
+(`signals/frames.py`) uses it; the Tier-3 CAN-frame faults corrupt the encoded bytes
+and decode back. Non-bus fields (`runtime_hours`, `vibration_mms`,
+`equipment_age_days`) have no layout. All Tier-1 fields are byte-aligned; the two
+top raw codes per field are reserved for J1939 *not-available* / *error* (both decode
+to `NULL`).
+
+| Field | PGN | Frame | Start bit | Bits | Scale | Offset |
+|---|---|---|---|---|---|---|
+| `engine_speed_rpm` | 61444 (EEC1) | bytes 4–5 | 24 | 16 | 0.125 | 0 |
+| `coolant_temp_c` | 65262 (ET1) | byte 1 | 0 | 8 | 1 | −40 |
+| `oil_pressure_kpa` | 65263 (EFL/P1) | byte 4 | 24 | 8 | 4 | 0 |
+| `engine_load_pct` | 61443 (EEC2) | byte 3 | 16 | 8 | 1 | 0 |
+| `fuel_rate_lph` | 65266 (LFE) | bytes 1–2 | 0 | 16 | 0.05 | 0 |
+| `boost_pressure_kpa` | 65270 (IC1) | byte 2 | 8 | 8 | 2 | 0 |
+| `egt_c` | 65270 (IC1) | bytes 6–7 | 40 | 16 | 0.03125 | −273 |
+| `def_level_pct` | 65110 (AT1T1I) | byte 1 | 0 | 8 | 0.4 | 0 |
 
 ## Documented cross-signal correlations (asserted in tests)
 
@@ -77,17 +100,32 @@ Beyond the signal columns, each reading row carries ground-truth labels:
 - `failure_within_h` (0/1) and `failure_mode` (`overheat` / `oil_starve` /
   `bearing`, else empty) — the multi-mode failure target (ADR-009).
 - `anomaly_type` — the labeled defect on the row (else empty): `obvious_outlier` /
-  `joint_outlier` / `sensor_stuck` / `sensor_drift` / `sensor_dropout`
-  (ADR-006/-016). One per row by injector priority; era-`NULL` cells are never
-  targeted.
+  `joint_outlier` / `sensor_stuck` / `sensor_drift` / `sensor_dropout` (F3) plus the
+  Tier-3 CAN-frame faults `can_frame_corrupt` / `can_frame_stale` /
+  `can_frame_error_indicator` / `can_frame_truncated` (F6, ADR-019). One per row by
+  injector priority; era-`NULL` cells are never targeted.
 - `anomaly_signal` — which signal carries that defect (empty if none).
 - `is_outlier` (bool) — back-compat rollup: true where the row carries a
-  *value-distorting* defect (everything except `sensor_dropout`, which blanks to
-  `NULL`).
+  *value-distorting* defect (`obvious_outlier`, `joint_outlier`, `sensor_stuck`,
+  `sensor_drift`, `can_frame_corrupt`, `can_frame_stale`). The NULL-blanking defects
+  (`sensor_dropout`, `can_frame_error_indicator`, `can_frame_truncated`) are labeled
+  in `anomaly_type` but not flagged here. (It is a per-row rollup over *all*
+  distorting cells, so a row can be `is_outlier` while a higher-priority
+  NULL-blanking defect won its categorical.)
+
+### `can_frames` (opt-in side table — F6)
+
+With `--emit-raw-frames` (`emit_raw_frames` in config), the byte-level corrupted
+J1939 frames behind each `can_frame_*` defect are written to a `can_frames` table:
+`unit_id`, `t_index`, `timestamp_h`, `signal`, `anomaly_type`, and the frame as
+uppercase hex (`frame_hex`). Absent otherwise — the decoded `readings` are the
+product; this is a byte-level artifact for QA/teaching.
 
 ## Not yet in Tier 1 (later phases)
 
-- Per-model SPN whitelists (finer than coarse eras) — F5.
-- Raw CAN frame layout (byte/bit positions per PGN) — would activate the PGN column.
-- CAN-frame fault patterns (malformed/implausible frames) — F5, once the frame
-  encoder exists; a new `anomaly_type` value, no schema change.
+- Per-model SPN whitelists (finer than coarse eras) — a Tier-2 refinement (F5 took
+  the first step with a per-model `build_year_min` capability floor).
+- ~~Raw CAN frame layout (byte/bit positions per PGN)~~ → done (F6, ADR-019): see
+  "Frame layout" above; the encoder/decoder lives in `signals/frames.py`.
+- ~~CAN-frame fault patterns (malformed/implausible frames)~~ → done (F6, ADR-019):
+  four `can_frame_*` `anomaly_type` values, no schema change.

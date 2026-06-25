@@ -4,21 +4,22 @@ Updated: 2026-06-25
 
 ## Current focus
 
-**F5 (Tier-2 diversity) is done.** Three axes of realism land as **declarative
-catalog entries that resolve to multipliers/offsets** — no new readings-schema
-columns (ADR-018, mirroring ADR-012/-016): (1) two more public-grounded
-regions/contracts (6 each now); (2) **equipment models** — each `EquipmentModel`
-carries per-failure-mode hazard multipliers + small baseline signature offsets +
-an optional `build_year_min` capability floor, assigned per unit (class-only
-fallback), surfaced as an `equipment_models` dimension table + `units.model_id`;
-(3) named **seasons** (`heatwave` / `cold_snap` / `wet_season` over `baseline`)
-shifting ambient + wear + per-mode hazards — the knob a future drift demo shifts,
-selectable via `--season` / config and echoed in `manifest.json`. The model ×
-season hazard multipliers compose multiplicatively into the single per-mode factor
-`derive_unit_labels` applies, so the failure label stays derived in one place
-(ADR-009). Default fleet → **134 units**. Next is **F6** (Tier-3 **CAN-frame
-faults** + the frame-level encoder they need — the inert PGNs of ADR-013 are the
-seam; deferred from F5 as a substantial standalone build).
+**F6 (Tier-3 CAN-frame faults + a frame-level encoder) is done — the roadmap's
+last planned phase.** ADR-013 left each signal's PGN inert; F6 activated it
+(ADR-019): a frozen `FrameLayout` on `SignalSpec` (byte/bit placement +
+scaling/offset) for the 8 bus signals, and a real **frame-level encoder/decoder**
+(`signals/frames.py`) — `value → raw → little-endian J1939 frame bytes` and back,
+modeling the not-available/error sentinels (both decode to `NULL`). Four CAN-frame
+fault families (`anomalies/frame_faults.py`), each a new `anomaly_type` *value* in
+the same open vocabulary (**no schema change**, ADR-016): `can_frame_corrupt` (byte
+flip → implausible decode), `can_frame_stale` (re-sent frame → frozen value, a
+transport fault), `can_frame_error_indicator` (error/NA code → `NULL`),
+`can_frame_truncated` (short DLC → `NULL`). Faults corrupt the **bytes** and **decode
+back** into the engineering column, so the dataset stays decoded; the byte-level
+corrupted frames are optionally written to a `can_frames` side table
+(`--emit-raw-frames` / `emit_raw_frames`, off by default). The value generators still
+never read the layout (the ADR-013 inert-PGN invariant is re-asserted by a test).
+Default fleet unchanged at **134 units**. **The planned roadmap (F0–F6) is complete.**
 
 ## Done
 
@@ -133,14 +134,48 @@ seam; deferred from F5 as a substantial standalone build).
   - **12 new offline tests (102 total green).** Verified e2e: default fleet → 134
     units; `equipment_models.csv` written; heatwave run produces more failures than
     baseline; reproducible under a non-baseline season.
+- **F6 — CAN-frame faults (Tier 3) & a frame-level encoder:**
+  - `signals/spec.py` — `FrameLayout` dataclass; the 8 bus signals get a layout
+    (start bit / bit length / scale / offset / little-endian / 8-byte frame) from the
+    published J1939-71 PGNs (EEC1/ET1/EFL-P1/EEC2/LFE/IC1/AT1T1I). Activates the seam
+    ADR-013 left inert (ADR-019).
+  - `signals/frames.py` — the **encoder/decoder**: `value_to_raw` / `raw_to_value`,
+    `encode_signal_frame` / `decode_signal_frame`, `frame_to_hex`. Reserves the top
+    two raw codes per field for the J1939 not-available/error sentinels (both decode
+    to `NULL`); a too-short frame decodes to `NULL`.
+  - `anomalies/spec.py` — four new `anomaly_type` values + `CAN_FRAME_TYPES`;
+    `InjectionHit` gains an optional `frames` payload (row → corrupted-frame hex).
+  - `anomalies/frame_faults.py` — the four injectors (corrupt / stale /
+    error_indicator / truncated), registered after the value/sensor families; only
+    bus signals (those with a layout) are targetable.
+  - `anomalies/inject.py` — default rates for the new types; `AnomalyLabels.frame_records()`.
+  - `config.py` — `emit_raw_frames` flag (config + JSON merge). `sim/simulate.py`
+    collects frame records → a `can_frames` table on `SimulatedDataset`. `io/writers.py`
+    writes `can_frames` only when flagged; manifest gains `emit_raw_frames` +
+    `n_can_frames`; dictionary documents the new types + table. `cli.py` —
+    `--emit-raw-frames` on `forge generate`.
+  - ADR-019 recorded; ROADMAP F6 ✅; DATA_DESIGN §8 + DATA_DICTIONARY updated.
+  - **30 new offline tests (132 total green).** Verified: codec round-trips every
+    signal within one quantum; all four families present/labeled/recoverable; raw
+    artifact matches the labeled cells and is opt-in; the generators ignore the layout
+    (ADR-013 invariant). E2e (3-day/5-min, seed 7) with `--emit-raw-frames`: 912
+    `can_frames` rows across the four types.
 
 ## Next step (concrete)
 
-**F6 — CAN-frame faults (Tier 3) & a frame-level encoder.** Build a frame-level
-J1939 encoder (per-PGN byte/bit layout, scaling/offset) over the inert PGNs recorded
-since ADR-013 — that is the seam. Then add CAN-frame fault injectors as new registry
-entries: each is a new `anomaly_type` *value* (ADR-016 — no schema change), labeled
-and recoverable. All config-driven, labeled, seeded; update DATA_DESIGN §8.
+**The planned roadmap (F0–F6) is complete.** The generator is a finished Tier-1→3
+synthetic-telemetry product: J1939-grounded signals, era gating, multi-mode failure
+labels, Tier-2 diversity (regions/models/seasons), distribution validation, and a
+full anomaly contract (value / sensor / CAN-frame faults). Candidate follow-ons, none
+committed:
+- The **4th vitrine (MLOps)** that consumes this generator — train → MLflow tracking
+  → model registry → FastAPI serving → drift monitoring, with `--season` as the drift
+  knob. This is the originally-planned downstream narrative.
+- A **README refresh** surfacing F4–F6 (validation overlap numbers, the frame codec,
+  the `can_frames` artifact) for the portfolio reader.
+- Polish: a `forge` example that round-trips a frame in the README; optional Tier-3
+  frame-fault tuning if VED-style validation reveals gaps.
+Pick a direction with Jorge before starting — F6 closed a clean boundary.
 
 ## Notes
 

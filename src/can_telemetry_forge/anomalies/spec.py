@@ -49,6 +49,15 @@ SENSOR_STUCK = "sensor_stuck"
 SENSOR_DRIFT = "sensor_drift"
 SENSOR_DROPOUT = "sensor_dropout"
 
+# CAN-frame faults (Tier 3, F6 / ADR-019). These are *transport-layer* corruptions —
+# they happen to the encoded J1939 frame, not to the transducer — and are decoded
+# back into the engineering table exactly as a receiver would see them. New *values*
+# in the same open vocabulary; no new column (ADR-016).
+CAN_FRAME_CORRUPT = "can_frame_corrupt"  # a payload byte flips → implausible decode
+CAN_FRAME_STALE = "can_frame_stale"  # frame re-sent → value frozen at the transport layer
+CAN_FRAME_ERROR_INDICATOR = "can_frame_error_indicator"  # J1939 error/NA code → NULL
+CAN_FRAME_TRUNCATED = "can_frame_truncated"  # short DLC → field bits absent → NULL
+
 # All defect tags, in a fixed order (downstream category order). NO_ANOMALY is the
 # absence of a defect, not a member of this tuple.
 ANOMALY_TYPES: tuple[str, ...] = (
@@ -57,14 +66,26 @@ ANOMALY_TYPES: tuple[str, ...] = (
     SENSOR_STUCK,
     SENSOR_DRIFT,
     SENSOR_DROPOUT,
+    CAN_FRAME_CORRUPT,
+    CAN_FRAME_STALE,
+    CAN_FRAME_ERROR_INDICATOR,
+    CAN_FRAME_TRUNCATED,
+)
+
+# The CAN-frame fault subset (for the raw-frame artifact and docs).
+CAN_FRAME_TYPES: frozenset[str] = frozenset(
+    {CAN_FRAME_CORRUPT, CAN_FRAME_STALE, CAN_FRAME_ERROR_INDICATOR, CAN_FRAME_TRUNCATED}
 )
 
 # The defect families that *distort a value* (as opposed to blanking it). The
 # ``is_outlier`` boolean rollup (kept for F2 back-compat) is True for these — a
 # value present but wrong. ``sensor_dropout`` blanks the cell (NULL) instead, so it
 # is a defect but not an "outlier value"; it is still recoverable via anomaly_type.
+# A corrupt or stale frame still carries a (wrong) value → value-distorting; an
+# error-indicator or truncated frame blanks to NULL → not an outlier value.
 VALUE_DISTORTION_TYPES: frozenset[str] = frozenset(
-    {OBVIOUS_OUTLIER, JOINT_OUTLIER, SENSOR_STUCK, SENSOR_DRIFT}
+    {OBVIOUS_OUTLIER, JOINT_OUTLIER, SENSOR_STUCK, SENSOR_DRIFT,
+     CAN_FRAME_CORRUPT, CAN_FRAME_STALE}
 )
 
 
@@ -77,11 +98,15 @@ class InjectionHit:
         mask: boolean array (aligned to the unit's rows) — ``True`` where this
             defect was injected into ``signal``.
         anomaly_type: the ground-truth tag (one of :data:`ANOMALY_TYPES`).
+        frames: optional ``row index → corrupted-frame hex`` map, populated only by
+            the CAN-frame injectors (F6) so the byte-level corruption can be emitted
+            as a side artifact. ``None`` for value-domain injectors.
     """
 
     signal: str
     mask: np.ndarray
     anomaly_type: str
+    frames: dict[int, str] | None = None
 
 
 # An injector mutates the per-signal arrays in place and returns its hits. It must
@@ -115,6 +140,11 @@ __all__ = [
     "SENSOR_STUCK",
     "SENSOR_DRIFT",
     "SENSOR_DROPOUT",
+    "CAN_FRAME_CORRUPT",
+    "CAN_FRAME_STALE",
+    "CAN_FRAME_ERROR_INDICATOR",
+    "CAN_FRAME_TRUNCATED",
+    "CAN_FRAME_TYPES",
     "ANOMALY_TYPES",
     "VALUE_DISTORTION_TYPES",
     "InjectionHit",

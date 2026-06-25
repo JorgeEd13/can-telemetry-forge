@@ -173,7 +173,7 @@ heatwave runs produce more failures than baseline, end-to-end.
 
 ---
 
-## F6 — CAN-frame faults (Tier 3) & a frame-level encoder  ☐
+## F6 — CAN-frame faults (Tier 3) & a frame-level encoder  ✅
 
 **Objective.** The trickier Tier-3 fault patterns: malformed / implausible **CAN
 frames** (bad byte/bit layout, out-of-spec PGN payloads), the corruption class that
@@ -186,3 +186,21 @@ no schema change. All configurable, labeled, seeded.
 
 **DoD.** Frame encoder round-trips the documented signals; CAN-frame faults labeled
 and recoverable from the labels; tested; DATA_DESIGN §8 updated.
+
+**Shipped.** `SignalSpec` gains a frozen `FrameLayout` (start bit, bit length,
+scale/offset, byte order) on the 8 bus signals, completing the J1939 identity ADR-013
+left inert (ADR-019). `signals/frames.py` is the **frame-level encoder/decoder**:
+`value → raw integer → little-endian frame bytes` and back, modeling the J1939
+not-available/error sentinels (both decode to `NULL`) and ≤8-byte frames. Four
+CAN-frame fault injectors (`anomalies/frame_faults.py`), each a new `anomaly_type`
+value in the same open vocabulary (no schema change): `can_frame_corrupt` (byte flip
+→ implausible decode), `can_frame_stale` (re-sent frame → frozen value, a transport
+fault), `can_frame_error_indicator` (error/NA code → `NULL`), `can_frame_truncated`
+(short DLC → `NULL`). They encode → corrupt the **bytes** → decode back into the
+engineering column, so the dataset stays decoded; the byte-level corrupted frames are
+optionally emitted to a `can_frames` side table (`--emit-raw-frames` /
+`emit_raw_frames`, off by default). `is_outlier` rollup, manifest counts, generated
+dictionary, and DATA_DESIGN §8 / DATA_DICTIONARY updated. **30 new offline tests (132
+total green.)** Verified e2e: the codec round-trips every signal within one quantum;
+all four families present, labeled, recoverable; the raw-frame artifact matches the
+labeled cells; the value generators still ignore the layout (ADR-013 invariant holds).

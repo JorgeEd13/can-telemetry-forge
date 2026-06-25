@@ -47,6 +47,41 @@ class Era(Enum):
 
 
 @dataclass(frozen=True)
+class FrameLayout:
+    """Byte/bit placement of one SPN within its J1939 PGN frame (F6, ADR-019).
+
+    This is the seam ADR-013 left open: the PGN was recorded inert; this completes
+    its J1939 identity with the *physical* layout — where in the (≤8-byte) frame the
+    parameter sits and how a raw integer maps to the engineering value. It is **data,
+    not behaviour** (mirroring ADR-012): the frame encoder/decoder reads it, the
+    value *generators* still ignore it (the ADR-013 inert-PGN test keeps holding).
+
+    The encoder/decoder relation is the standard J1939 linear one::
+
+        raw  = round((value - offset) / scale)          # value → raw integer
+        value = raw * scale + offset                      # raw integer → value
+
+    Attributes:
+        start_bit: 0-based bit position of the field's least-significant bit within
+            the frame (bit 0 = LSB of byte 0). J1939 fields are byte-aligned in the
+            Tier-1 set, so this is always a multiple of 8.
+        bit_len: field width in bits (8 or 16 for the Tier-1 signals).
+        scale: engineering units per raw bit (the J1939 resolution).
+        offset: engineering-unit offset added after scaling (e.g. −40 °C, −273 °C).
+        byte_order: ``"little"`` (J1939's intel/LSB-first convention) for every
+            multi-byte Tier-1 field; kept explicit so the decoder is unambiguous.
+        frame_bytes: the PGN's transmitted length in bytes (8 for the Tier-1 PGNs).
+    """
+
+    start_bit: int
+    bit_len: int
+    scale: float
+    offset: float
+    byte_order: str = "little"
+    frame_bytes: int = 8
+
+
+@dataclass(frozen=True)
 class SignalSpec:
     """Self-describing definition of one telemetry signal.
 
@@ -61,11 +96,11 @@ class SignalSpec:
             marks a non-gated field.
         drivers: names of the signals/inputs this one is correlated with. Documents
             the dependency graph and is asserted (by sign) in the tests.
-        pgn: SAE J1939 Parameter Group Number that carries this SPN. **Recorded but
-            inert by default** (ADR-013): we model engineering-unit time-series, not
-            raw CAN frames, so the PGN is not used in generation yet. It is captured
-            now so a future frame-level encoder (byte/bit layout) can switch it on
-            without re-researching the standard.
+        pgn: SAE J1939 Parameter Group Number that carries this SPN. Recorded since
+            F1 (ADR-013); from F6 a J1939 ``layout`` completes its frame identity.
+        layout: byte/bit placement of this SPN within its PGN frame (ADR-019), or
+            ``None`` for non-bus derived fields (runtime, age, vibration add-on).
+            The frame encoder/decoder reads it; the value generators still don't.
         description: one-line human description for the data dictionary.
     """
 
@@ -77,6 +112,7 @@ class SignalSpec:
     era: Era
     drivers: tuple[str, ...] = ()
     pgn: int | None = None
+    layout: FrameLayout | None = None
     description: str = ""
 
 
@@ -101,34 +137,40 @@ TIER1_SIGNALS: tuple[SignalSpec, ...] = (
     SignalSpec(
         name="engine_speed_rpm",
         spn=190,
-        pgn=61444,
+        pgn=61444,  # EEC1
         unit="rpm",
         min_value=0.0,
         max_value=8031.875,  # J1939 max raw 64255 × 0.125 rpm/bit
         era=Era.LEGACY,
         drivers=(DRIVER_DUTY,),
+        # EEC1 bytes 4–5 (start bit 24), 16-bit, 0.125 rpm/bit.
+        layout=FrameLayout(start_bit=24, bit_len=16, scale=0.125, offset=0.0),
         description="Engine speed. J1939 0.125 rpm/bit.",
     ),
     SignalSpec(
         name="coolant_temp_c",
         spn=110,
-        pgn=65262,
+        pgn=65262,  # ET1
         unit="degC",
         min_value=-40.0,
         max_value=210.0,  # J1939 1 °C/bit, offset -40 °C
         era=Era.LEGACY,
         drivers=(DRIVER_AMBIENT_C, "engine_load_pct", DRIVER_WEAR),
+        # ET1 byte 1 (start bit 0), 8-bit, 1 degC/bit, offset -40.
+        layout=FrameLayout(start_bit=0, bit_len=8, scale=1.0, offset=-40.0),
         description="Engine coolant temperature. J1939 1 degC/bit, offset -40.",
     ),
     SignalSpec(
         name="oil_pressure_kpa",
         spn=100,
-        pgn=65263,
+        pgn=65263,  # EFL/P1
         unit="kPa",
         min_value=0.0,
         max_value=1000.0,  # J1939 4 kPa/bit
         era=Era.LEGACY,
         drivers=("engine_speed_rpm", DRIVER_WEAR),
+        # EFL/P1 byte 4 (start bit 24), 8-bit, 4 kPa/bit.
+        layout=FrameLayout(start_bit=24, bit_len=8, scale=4.0, offset=0.0),
         description="Engine oil pressure. J1939 4 kPa/bit.",
     ),
     SignalSpec(
@@ -145,56 +187,66 @@ TIER1_SIGNALS: tuple[SignalSpec, ...] = (
     SignalSpec(
         name="engine_load_pct",
         spn=92,
-        pgn=61443,
+        pgn=61443,  # EEC2
         unit="pct",
         min_value=0.0,
         max_value=125.0,  # J1939 1 %/bit, valid to 125 %
         era=Era.MID,
         drivers=(DRIVER_DUTY, DRIVER_TERRAIN_ROUGHNESS),
+        # EEC2 byte 3 (start bit 16), 8-bit, 1 %/bit.
+        layout=FrameLayout(start_bit=16, bit_len=8, scale=1.0, offset=0.0),
         description="Engine percent load at current speed. J1939 1 %/bit.",
     ),
     SignalSpec(
         name="fuel_rate_lph",
         spn=183,
-        pgn=65266,
+        pgn=65266,  # LFE
         unit="L/h",
         min_value=0.0,
         max_value=3212.75,  # J1939 0.05 L/h per bit
         era=Era.MID,
         drivers=("engine_load_pct", "engine_speed_rpm"),
+        # LFE bytes 1–2 (start bit 0), 16-bit, 0.05 L/h per bit.
+        layout=FrameLayout(start_bit=0, bit_len=16, scale=0.05, offset=0.0),
         description="Engine fuel rate. J1939 0.05 L/h per bit.",
     ),
     SignalSpec(
         name="boost_pressure_kpa",
         spn=102,
-        pgn=65270,
+        pgn=65270,  # IC1
         unit="kPa",
         min_value=0.0,
         max_value=500.0,  # J1939 2 kPa/bit
         era=Era.MID,
         drivers=("engine_load_pct", DRIVER_ALTITUDE_M),
+        # IC1 byte 2 (start bit 8), 8-bit, 2 kPa/bit.
+        layout=FrameLayout(start_bit=8, bit_len=8, scale=2.0, offset=0.0),
         description="Intake manifold (boost) pressure. J1939 2 kPa/bit.",
     ),
     SignalSpec(
         name="egt_c",
         spn=173,
-        pgn=65270,
+        pgn=65270,  # IC1 (exhaust gas temperature field)
         unit="degC",
         min_value=-273.0,
         max_value=1734.96875,  # J1939 0.03125 degC/bit, offset -273
         era=Era.MODERN,
         drivers=("engine_load_pct", DRIVER_ALTITUDE_M),
+        # IC1 bytes 6–7 (start bit 40), 16-bit, 0.03125 degC/bit, offset -273.
+        layout=FrameLayout(start_bit=40, bit_len=16, scale=0.03125, offset=-273.0),
         description="Exhaust gas temperature. J1939 0.03125 degC/bit, offset -273.",
     ),
     SignalSpec(
         name="def_level_pct",
         spn=1761,
-        pgn=65110,
+        pgn=65110,  # AT1T1I (DEF/catalyst tank information)
         unit="pct",
         min_value=0.0,
         max_value=100.0,  # J1939 0.4 %/bit
         era=Era.MODERN,
         drivers=("runtime_hours",),
+        # AT1T1I byte 1 (start bit 0), 8-bit, 0.4 %/bit.
+        layout=FrameLayout(start_bit=0, bit_len=8, scale=0.4, offset=0.0),
         description="Diesel exhaust fluid (DEF) tank level. J1939 0.4 %/bit.",
     ),
     SignalSpec(
@@ -243,6 +295,7 @@ def get_spec(name: str) -> SignalSpec:
 
 __all__ = [
     "Era",
+    "FrameLayout",
     "SignalSpec",
     "TIER1_SIGNALS",
     "SIGNALS_BY_NAME",

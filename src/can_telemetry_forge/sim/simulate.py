@@ -74,6 +74,9 @@ class SimulatedDataset:
     equipment_models: pd.DataFrame
     regions: pd.DataFrame
     contracts: pd.DataFrame
+    # The byte-level corrupted CAN frames (F6, ADR-019). Always built; empty unless a
+    # frame fault fired. Written as a side table only when ``config.emit_raw_frames``.
+    can_frames: pd.DataFrame
     config: ForgeConfig
 
 
@@ -177,6 +180,9 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
 
     cols = signal_names()
     frames: list[pd.DataFrame] = []
+    # (unit_id, t_index, timestamp_h, signal, anomaly_type, frame_hex) for the F6
+    # raw-frame side artifact; populated only by CAN-frame faults (ADR-019).
+    frame_rows: list[dict] = []
 
     for i, unit in enumerate(units):
         region = region_by_id[unit.region_id]
@@ -218,6 +224,21 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         frame["anomaly_signal"] = anomalies.anomaly_signal
         frames.append(pd.DataFrame(frame))
 
+        # Collect the byte-level corrupted frames (F6). Built regardless of the
+        # ``emit_raw_frames`` flag (cheap when no frame fault fired); the writer
+        # decides whether to persist it.
+        for t_index, signal, atype, frame_hex in anomalies.frame_records():
+            frame_rows.append(
+                {
+                    "unit_id": unit.unit_id,
+                    "t_index": t_index,
+                    "timestamp_h": t_index * step_h,
+                    "signal": signal,
+                    "anomaly_type": atype,
+                    "frame_hex": frame_hex,
+                }
+            )
+
     readings = (
         pd.concat(frames, ignore_index=True)
         if frames
@@ -230,6 +251,11 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         )
     )
 
+    can_frames = pd.DataFrame(
+        frame_rows,
+        columns=["unit_id", "t_index", "timestamp_h", "signal", "anomaly_type", "frame_hex"],
+    )
+
     dims = _dimension_tables(config, units)
     return SimulatedDataset(
         readings=readings,
@@ -238,6 +264,7 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         equipment_models=dims["equipment_models"],
         regions=dims["regions"],
         contracts=dims["contracts"],
+        can_frames=can_frames,
         config=config,
     )
 
