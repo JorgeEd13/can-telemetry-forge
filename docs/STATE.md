@@ -1,8 +1,25 @@
 # State — can-telemetry-forge
 
-Updated: 2026-06-25
+Updated: 2026-06-26
 
 ## Current focus
+
+**Post-F6 realism fix — progressive pre-failure degradation (ADR-020), v0.2.0.**
+Consuming the generator from `forge-pdm-mlops` surfaced a real defect: the failure
+model sampled an *event time* and marked a horizon window but never made the signals
+**drift** toward the event, so a failing unit's pre-failure rows were statistically
+identical to its healthy rows (within-unit separation ≤ 0.06 SD; vibration +0.007) and
+a per-row classifier scored ≈ 0.55 (chance) *by construction*. DATA_DESIGN §7 always
+promised a signature the failure "builds toward" — it just wasn't implemented.
+**`labels/failure.apply_degradation`** now injects a convex ramp into the winning mode's
+signature signals across the pre-event horizon (overheat → coolant/EGT climb;
+oil_starve → oil sags; bearing → vibration rises), clamped to J1939 range, run after the
+clean-signal label (ADR-009 intact) and before defect injection. **Measured:** base
+features ≈ 0.55 → **0.73** ROC-AUC, ≈ **0.82** once the consumer adds `vibration_mms`;
+failure rate steady at ≈ 8 %. Two hazard rebalances (scale-wear-down; sustained-stress)
+were prototyped, **scored, and rejected** — neither beat the ramp (logged in ADR-020, the
+F2.5-style honest negative). **Version bumped 0.1.0 → 0.2.0** (data changed → the pin
+moves; the consumer's fixture was rebuilt). **135 tests green** (+3 degradation tests).
 
 **F6 (Tier-3 CAN-frame faults + a frame-level encoder) is done — the roadmap's
 last planned phase.** ADR-013 left each signal's PGN inert; F6 activated it

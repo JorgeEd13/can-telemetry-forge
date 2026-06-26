@@ -29,7 +29,7 @@ import pandas as pd
 
 from ..anomalies import ANOMALY_TYPES, apply_anomalies
 from ..config import ForgeConfig
-from ..labels import FAILURE_MODES, derive_unit_labels
+from ..labels import FAILURE_MODES, apply_degradation, derive_unit_labels
 from ..signals import generate_unit, signal_names
 from .drivers import drivers_for_unit
 from .fleet import Unit, build_fleet
@@ -208,6 +208,12 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         labels = derive_unit_labels(
             signals, drivers.wear, step_h, config.failure_horizon_h, rng_labels, hazard_mult
         )
+
+        # Inject the progressive pre-failure degradation into the winning mode's
+        # signature signals across the horizon window (ADR-020) — AFTER the clean-signal
+        # label (so the label stays ADR-009-clean) and BEFORE unrelated defects, since
+        # the drift IS the failure physics, not a glitch.
+        signals = apply_degradation(signals, labels)
 
         # Inject all labeled defects AFTER labelling (ADR-006/-016).
         anomalies = apply_anomalies(signals, anomaly_rates, rng_anomalies, n)

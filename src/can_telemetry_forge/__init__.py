@@ -17,6 +17,6 @@ from importlib import metadata
 try:
     __version__ = metadata.version("can-telemetry-forge")
 except metadata.PackageNotFoundError:  # pragma: no cover - source-tree fallback
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
 __all__ = ["__version__"]

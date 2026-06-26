@@ -219,6 +219,18 @@ records both the **horizon** (`failure_within_h`, with `h` configurable) and the
 **mode** (so consumers can do per-mode evaluation). Hazard → event sampling is
 seeded.
 
+**Progressive degradation — the signature actually *builds toward* the event
+(ADR-020).** Sampling an event time is only half a realistic failure; the signature
+column "builds toward" must be *visible in the rows*. After the event is sampled (from
+the clean signals), the simulator ramps the winning mode's signature signals abnormally
+across the pre-event horizon — a convex ramp from normal at the window's start to a full
+fault excursion at the event (overheat → coolant/EGT **climb**, oil_starve → oil
+pressure **sags**, bearing → vibration **rises**), clamped to the J1939 range. Without
+this the labelled horizon rows are indistinguishable from a unit's healthy rows and a
+per-row model scores at chance; with it the same model learns a real degradation signal
+(measured ≈ 0.55 → 0.82 ROC-AUC downstream). The ramp is the failure physics, so it runs
+*before* the unrelated defect injection (§8) — it is never a "glitch".
+
 **Tier-2 hazard modifiers (F5, ADR-018).** Each mode's hazard is further scaled by a
 per-mode multiplier = the unit's **equipment-model** reliability × the run's
 **season**, combined multiplicatively. A failure-prone make in a heatwave fails
