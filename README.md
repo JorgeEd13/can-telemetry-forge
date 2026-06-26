@@ -7,7 +7,7 @@
 <p align="center"><em>Synthetic heavy-equipment telemetry, grounded in the J1939 standard — realistic predictive-maintenance data you can regenerate from a seed.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-F6%20%E2%80%94%20Tier--3%20complete-success" alt="Status: F6 — Tier-3 complete">
+  <img src="https://img.shields.io/badge/status-F0%E2%80%93F6%20complete%20%C2%B7%20v0.2.0-success" alt="Status: F0–F6 complete · v0.2.0">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/data-100%25%20synthetic-blueviolet" alt="100% synthetic data">
   <img src="https://img.shields.io/badge/grounded-SAE%20J1939%20%2B%20physics-teal" alt="Grounded in SAE J1939 + physics">
@@ -43,7 +43,10 @@ drift monitoring), with `--season` as the knob that demo will shift.
 > real-data overlap). **The planned roadmap (F0–F6) is complete** (see
 > [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2 diversity (regions, equipment models,
 > seasons) shipped in F5; Tier-3 CAN-frame faults + a J1939 frame-level encoder
-> shipped in F6.
+> shipped in F6. **v0.2.0** then added **progressive pre-failure degradation**
+> (ADR-020) — the failing mode's signature now *builds toward* the event, making the
+> target genuinely learnable (a downstream model goes from chance ≈ 0.55 to ≈ 0.82
+> ROC-AUC).
 
 ## Why it's credible (and clean-room)
 
@@ -81,9 +84,14 @@ rationale in [`docs/DECISIONS.md`](docs/DECISIONS.md)):
   their bus actually supported — unsupported signals are emitted as **`NULL`, never
   zero**. Structural missingness a downstream model has to handle, the way real
   mixed-age fleets behave.
-- **Multi-mode failures.** Distinct failure modes (overheating, oil starvation,
-  bearing/mechanical wear) each build their own signal signature, so the prediction
-  target is genuinely learnable and per-mode evaluable.
+- **Multi-mode failures that *progressively degrade*.** Distinct failure modes
+  (overheating, oil starvation, bearing/mechanical wear) each build their own signal
+  signature — and the signature **ramps up over the hours before the event** (coolant
+  climbs, oil pressure sags, vibration rises), the way a real machine degrades, not a
+  flag that flips out of nowhere (ADR-020). Without that drift the pre-failure rows are
+  indistinguishable from healthy ones; with it the target is genuinely learnable
+  per-row (a downstream LightGBM goes from ≈ 0.55 to ≈ 0.82 ROC-AUC) and per-mode
+  evaluable.
 - **Environment that wears the machine.** Per-region **thermal + wear + terrain /
   road-quality** modifiers (grounded in public data) shift signal baselines *and*
   accelerate failure hazards — the seam a future drift demo shifts.

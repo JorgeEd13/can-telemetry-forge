@@ -28,6 +28,17 @@ Method (per unit, all seeded — ADR-005):
 The hazard *magnitudes* are first-pass plausible constants (refined in F5); what is
 contractual — and asserted in tests — is the **monotonic direction**: worse
 signatures and more wear ⇒ more failures.
+
+**Progressive degradation (ADR-020).** Sampling an event time is only half of a
+realistic failure: a real machine *builds toward* it — the failing subsystem's
+signals drift abnormally over the hours before the event (coolant/EGT climb toward
+an overheat, oil pressure sags toward starvation, vibration rises toward a bearing
+failure). Without that, the rows the horizon label marks are statistically identical
+to the unit's healthy rows and nothing is learnable *per row*. :func:`apply_degradation`
+injects that progressive drift into the winning mode's signature signals across the
+pre-event horizon (clamped to the J1939 range), so the label has a real, growing
+signal behind it. It runs in the simulator **after** the clean-signal label is
+derived (ADR-009 stays intact) and **before** unrelated defect injection.
 """
 
 from __future__ import annotations
@@ -35,6 +46,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+
+from ..signals import get_spec
 
 # Modes, in a fixed order (also the column/category order downstream).
 FAILURE_MODES: tuple[str, ...] = ("overheat", "oil_starve", "bearing")
@@ -50,6 +63,23 @@ _OIL_LOAD_MIN = 0.35          # only counts as starvation while genuinely loaded
 _BEARING_VIB_MMS = 7.0        # vibration stress ramps in above this
 _WEAR_GAIN = 2.5              # accumulated wear multiplies every mode's hazard
 _HAZARD_BASE = 4.0e-6         # per (stress·step) probability scale
+
+# --- progressive degradation (ADR-020) ---------------------------------------
+# Each mode degrades its *signature* signals over the pre-event horizon: a ramp from
+# 0 at the start of the marked window to a full excursion at the event. The map gives
+# (signal, peak engineering-unit excursion at the event); the sign is the direction a
+# real fault pushes the reading. Magnitudes are sized to clear the hazard thresholds
+# above (e.g. coolant ramps ~30 °C, well past the 100 °C overheat knee) so the drift is
+# visible but stays plausible after the J1939 clamp.
+_DEGRADATION: dict[str, tuple[tuple[str, float], ...]] = {
+    "overheat": (("coolant_temp_c", +28.0), ("egt_c", +160.0)),
+    "oil_starve": (("oil_pressure_kpa", -180.0),),
+    "bearing": (("vibration_mms", +9.0),),
+}
+# The ramp accelerates toward the event (convex) — early drift is subtle, the last
+# hours are steep — which is both realistic and keeps most of the marked window from
+# looking like a step change. progress**_DEGRADATION_SHAPE, progress in [0, 1].
+_DEGRADATION_SHAPE = 1.8
 
 
 @dataclass(frozen=True)
@@ -181,4 +211,52 @@ def derive_unit_labels(
     )
 
 
-__all__ = ["FAILURE_MODES", "UnitLabels", "derive_unit_labels"]
+def apply_degradation(
+    signals: dict[str, np.ndarray | None],
+    labels: UnitLabels,
+) -> dict[str, np.ndarray | None]:
+    """Inject progressive pre-failure drift into the winning mode's signature signals.
+
+    Given the clean signals and the derived :class:`UnitLabels`, ramp each of the
+    failing mode's signature signals from its normal value (at the start of the marked
+    horizon window) to a full fault excursion (at the event row), accelerating toward
+    the event (:data:`_DEGRADATION_SHAPE`). The result is clamped to the signal's
+    documented J1939 range. Signals a unit's era gates off (``None``) are skipped — a
+    mode whose only evidence is era-gated simply leaves no visible drift, which is the
+    same realistic property the hazard already has.
+
+    Returns a **new** dict (the input is not mutated). A no-failure unit, or a mode
+    with no degradable signature present, is returned unchanged. This runs in the
+    simulator after :func:`derive_unit_labels` (so the label is from clean signals,
+    ADR-009) and before unrelated defect injection (ADR-006/-016).
+    """
+    out: dict[str, np.ndarray | None] = dict(signals)
+    if labels.event_index is None or labels.event_mode == NO_FAILURE:
+        return out
+
+    marked = np.nonzero(labels.failure_within_h == 1)[0]
+    if marked.size < 2:
+        return out  # nothing to ramp across (degenerate single-row window)
+    start, event = int(marked[0]), int(labels.event_index)
+    span = event - start
+    if span <= 0:
+        return out
+
+    # Convex ramp 0→1 across [start, event], 0 elsewhere.
+    idx = np.arange(labels.n)
+    progress = np.clip((idx - start) / span, 0.0, 1.0)
+    ramp = np.where(
+        (idx >= start) & (idx <= event), progress ** _DEGRADATION_SHAPE, 0.0
+    )
+
+    for name, peak in _DEGRADATION.get(labels.event_mode, ()):  # type: ignore[union-attr]
+        series = out.get(name)
+        if series is None:
+            continue  # era-gated off for this unit → no drift for this channel
+        spec = get_spec(name)
+        degraded = series + ramp * peak
+        out[name] = np.clip(degraded, spec.min_value, spec.max_value)
+    return out
+
+
+__all__ = ["FAILURE_MODES", "UnitLabels", "derive_unit_labels", "apply_degradation"]

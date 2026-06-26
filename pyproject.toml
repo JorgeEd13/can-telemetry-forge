@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "can-telemetry-forge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Synthetic heavy-equipment CAN Bus telemetry generator (SAE J1939 + physics) for predictive-maintenance datasets."
 readme = "README.md"
 requires-python = ">=3.11"

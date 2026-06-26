@@ -15,8 +15,9 @@ import pytest
 
 from can_telemetry_forge.anomalies import inject_obvious_outliers
 from can_telemetry_forge.config import SEASONS, config_from_dict, default_config
-from can_telemetry_forge.labels import FAILURE_MODES, derive_unit_labels
-from can_telemetry_forge.signals import Era, era_for_model_year, generate_unit, signal_names
+from can_telemetry_forge.labels import FAILURE_MODES, apply_degradation, derive_unit_labels
+from can_telemetry_forge.labels.failure import _DEGRADATION
+from can_telemetry_forge.signals import Era, era_for_model_year, generate_unit, get_spec, signal_names
 from can_telemetry_forge.sim import build_fleet, simulate
 from can_telemetry_forge.sim.drivers import drivers_for_unit
 
@@ -135,6 +136,85 @@ def test_legacy_unit_cannot_fail_on_modern_only_mode() -> None:
         if labels.event_index is not None:
             modes_seen.add(labels.event_mode)
     assert "bearing" not in modes_seen  # vibration is era-gated off for Legacy
+
+
+# --- progressive degradation (ADR-020) ---------------------------------------
+
+
+def _degraded_unit(mode_seed: int):
+    """A worn unit's clean signals + labels + degraded signals (for one seed)."""
+    cfg = small_config()
+    region = cfg.fleet.regions[0]
+    unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
+    n, step = cfg.n_steps(), cfg.step_hours()
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(mode_seed))
+    signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(mode_seed))
+    labels = derive_unit_labels(
+        signals, np.full(n, 0.99), step, cfg.failure_horizon_h, np.random.default_rng(mode_seed)
+    )
+    degraded = apply_degradation(signals, labels)
+    return signals, labels, degraded
+
+
+def test_degradation_is_a_pure_function_no_failure_noop() -> None:
+    # A no-failure unit (or empty window) comes back byte-identical — degradation only
+    # touches the marked horizon of a unit that actually fails.
+    cfg = small_config()
+    region = cfg.fleet.regions[0]
+    unit = build_fleet(cfg.fleet, np.random.default_rng(0))[0]
+    n, step = cfg.n_steps(), cfg.step_hours()
+    drivers = drivers_for_unit(unit, region, _BASELINE, n, step, np.random.default_rng(0))
+    signals = generate_unit(Era.MODERN, drivers, np.random.default_rng(0))
+    no_fail = derive_unit_labels(
+        signals, np.zeros(n), step, cfg.failure_horizon_h, np.random.default_rng(0)
+    )
+    assert no_fail.event_index is None
+    out = apply_degradation(signals, no_fail)
+    for name, series in signals.items():
+        if series is None:
+            assert out[name] is None
+        else:
+            assert np.array_equal(out[name], series)
+
+
+def test_degradation_ramps_the_winning_mode_signature_toward_the_event() -> None:
+    # For a failing unit, the winning mode's signature signals must drift in the fault
+    # direction and be MORE extreme at the event than at the start of the window.
+    for seed in range(40):
+        signals, labels, degraded = _degraded_unit(seed)
+        if labels.event_index is None:
+            continue
+        marked = np.nonzero(labels.failure_within_h == 1)[0]
+        if marked.size < 2:
+            continue
+        start, event = int(marked[0]), int(labels.event_index)
+        for name, peak in _DEGRADATION[labels.event_mode]:
+            if signals.get(name) is None:
+                continue  # era-gated off → no drift expected
+            delta = degraded[name] - signals[name]
+            # No change before the window; growth within it, peaking near the event.
+            assert np.allclose(delta[:start], 0.0)
+            assert abs(delta[event]) >= abs(delta[start])
+            # The drift direction matches the fault's sign.
+            assert np.sign(delta[event]) == np.sign(peak) or delta[event] == 0.0
+        return
+    pytest.skip("no failing unit produced in the scanned seeds")
+
+
+def test_degradation_stays_within_j1939_range() -> None:
+    for seed in range(40):
+        signals, labels, degraded = _degraded_unit(seed)
+        if labels.event_index is None:
+            continue
+        for name in degraded:
+            series = degraded[name]
+            if series is None:
+                continue
+            spec = get_spec(name)
+            assert series.min() >= spec.min_value - 1e-6
+            assert series.max() <= spec.max_value + 1e-6
+        return
+    pytest.skip("no failing unit produced in the scanned seeds")
 
 
 # --- obvious outliers (labeled, recoverable) ---------------------------------

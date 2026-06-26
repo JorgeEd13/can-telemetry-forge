@@ -521,3 +521,72 @@ F3 is replaced by the directional invariant (a distorting *winning* label ⇒
 provenance holds (all layouts are published SAE J1939-71, no real frame is a seed).
 Tier-3 is complete — the project's anomaly contract now spans value, sensor, and
 transport-layer defects, all labeled and recoverable.
+
+---
+
+## ADR-020 — Progressive pre-failure degradation: the failing mode's signature *builds toward* the event (and two measured-negative hazard rebalances)
+
+**Date:** 2026-06-26 · **Phase:** post-F6 realism fix · **Status:** accepted
+
+**Context.** Consuming this generator from the companion `forge-pdm-mlops` repo
+surfaced a real defect in the failure model. DATA_DESIGN §7 and ADR-009 promise that
+each failure mode has a **signature it builds toward**, "so a downstream model has
+something real to learn." But the implementation only sampled an *event time* from a
+hazard and marked a horizon window — it **never made the signals drift** as the event
+approached. Measured on a regenerated dataset, the consequence was stark: a failing
+unit's pre-failure rows were **statistically identical to its own healthy rows**
+(within-unit mean separation ≤ 0.06 SD on every feature; vibration **+0.007 SD**). The
+label encoded *when* a unit failed, but nothing in the signals **built toward** it, so
+a per-row classifier scored ≈ 0.55 ROC-AUC — a coin flip — *by construction*, not for
+lack of modelling effort downstream. The hazard correctly says *which* units are at
+risk; it never made the risk **observable over time**.
+
+**Decision — a progressive degradation ramp** (`labels/failure.apply_degradation`).
+Once `derive_unit_labels` has sampled the event (still from the **clean** signals, so
+ADR-009 holds), the simulator injects a **convex ramp** into the winning mode's
+*signature* signals across the marked horizon: 0 at the window start → a full fault
+excursion at the event (`progress ** 1.8`, so early drift is subtle and the last hours
+steepen). The per-mode signature map is the documented physics: `overheat` →
+coolant/EGT **climb**, `oil_starve` → oil pressure **sags**, `bearing` → vibration
+**rises**. Every result is clamped to the signal's J1939 range; era-gated-off channels
+simply carry no drift (the same realistic property the hazard already has). It runs in
+`simulate` **after** the clean-signal label and **before** unrelated defect injection —
+the drift **is** the failure physics, not a glitch (so it precedes ADR-006/-016
+anomalies, unlike them). `apply_degradation` is a pure function (no mutation); a
+no-failure unit is returned unchanged.
+
+**Result (measured, regenerated dataset, the consumer's own LightGBM + unit-grouped
+split).** The ramp alone took the eight base features from **≈ 0.55 → 0.73** ROC-AUC;
+the within-unit signature separation rose to coolant **+0.31 SD**, vibration **+0.58
+SD**. The failure rate stayed put at **≈ 8 %** (the ramp changes *visibility*, not
+*who/when* fails). Adding `vibration_mms` as a model feature downstream (it was the
+whole bearing signature, previously unused) reached **≈ 0.82**. The score now reflects
+a real, learnable degradation signal — earned from raw sensors, no leakage.
+
+**Two hazard rebalances tried and *rejected on measurement* (the honesty note).** A
+fair question was whether to also make *which unit* fails more signal-driven (the
+hazard multiplies a per-row signature stress by a near-constant `(1 + 2.5·wear)`
+wear gain). Two distinct levers were prototyped and scored, **not assumed**:
+1. **Scale the wear gain down** (so signature stress dominates): every variant scored
+   *lower* (0.80–0.81 vs 0.82) and dropped the failure rate — wear, though flat within
+   a window, genuinely correlates with sick units, so removing it *loses* real signal.
+2. **Reward sustained stress** (a rolling-mean hazard term, matching the docstrings'
+   "sustained high coolant"): the best variant was **0.8238 vs 0.8218 — a ~0.002 wash
+   (noise)** and it pushed the failure rate to ≈ 9.7 %.
+Both were **dropped**: the ramp had already captured the learnable signal, and neither
+lever beat it. The hazard constants are **unchanged**. Documenting the negative results
+(rather than shipping complexity for noise) is the same discipline as the F2.5 temporal
+rewrite in the consumer repo.
+
+**Why.** This makes the generator faithful to the PdM physics it already claimed to
+model — progressive degradation is how real machines fail — and it is the *clean* way
+to make the data learnable: the signal comes from the **physics of the failing
+subsystem drifting before the event**, never from leaking the label. The fix lives
+entirely in the generator's failure physics; the consumer just reads honester data.
+
+**Consequences.** `failure_within_h` now has a real, growing signal behind it; reported
+PdM models move from chance to ≈ 0.82 on raw sensors. Determinism holds (the ramp is a
+deterministic function of the already-seeded labels/signals). The clean-room provenance
+is untouched (documented physics, no real telemetry). The committed smoke fixture and
+the consumer's canonical dataset must be **regenerated** against this change (a
+deliberate, pinned data refresh — the consumer pins `can-telemetry-forge==0.1.0`).
