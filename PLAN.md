@@ -151,6 +151,50 @@ Regions / climate / seasonality modifiers; multiple equipment models with distin
 profiles; subtle joint outliers and CAN-fault patterns. Clearly-scoped extensions
 that deepen realism and set up the future MLOps drift demo.
 
+### Phase 6 — Richer failure modes (PROPOSED — not yet built)
+**Motivation.** The label layer models three failure modes today
+(`overheat` / `oil_starve` / `bearing` — `labels/failure.py:FAILURE_MODES`). A
+predictive-maintenance dataset that only knows three modes under-sells the "full
+CAN Bus data" premise; more distinct modes make both the data and the downstream
+model story richer, and exercise the `boost_pressure_kpa` / `def_level_pct` signals
+that currently drive no failure.
+
+**Extension points (all local edits — the same "data + a small behaviour" pattern
+as the anomaly registry).** Per new mode: (1) add its name to `FAILURE_MODES`;
+(2) a hazard in `_mode_hazards` (soft-thresholded stress × wear-gain); (3) a
+degradation signature in `_DEGRADATION` (signal → peak engineering-unit excursion,
+sized to clear the hazard knee); (4) threshold constants; (5) per-class and
+per-season `hazard_mult` entries in `config.py`. The `failure_mode` schema stays
+closed (one categorical), open vocabulary — a new mode is a new *value*, never a
+new column.
+
+**Candidate modes, chosen for *distinct* signatures** (so a classifier can separate
+them, and so they use the two idle signals):
+
+| mode | pre-failure signature | why distinct |
+|---|---|---|
+| `turbo_underboost` | boost ↓ under load, EGT ↑, fuel ↑ | the boost **drop** separates it from `overheat` (coolant+EGT) |
+| `aftertreatment_derate` (DEF/SCR) | DEF level ↓ → engine-load ceiling | uses `def_level_pct`, unused by any current mode |
+| `injector_fouling` | fuel ↑ decoupled from load, rough RPM | fuel-vs-load decoupling is its own pattern |
+
+**Two constraints the design must honour:**
+- **Avoid the mode↔missingness confound.** `oil_starve` currently strikes an older
+  sensor-era that lacks egt/DEF/vibration, so a downstream model can partly detect
+  it via *which sensors are NULL* rather than the physics. A mode keyed on
+  `def_level` would only exist on DEF-equipped (newer) units — the same trap. Either
+  base signatures on widely-present signals, or deliberately spread each mode across
+  eras (and document the choice). *(Surfaced 2026-07-06 building the downstream demo
+  fixture — see forge-pdm-mlops ADR-019.)*
+- **Downstream ripple is part of the phase.** New modes force the consumer
+  (`forge-pdm-mlops`) to regenerate the full dataset, re-baseline overall + per-mode
+  AUC, regenerate its multi-mode smoke fixture (its builder already iterates
+  `FAILURE_MODES`, so it auto-covers new modes), and add + validate a `/demo` preset
+  per mode. Treat that as the phase's definition-of-done, not an afterthought.
+
+**Recommended first cut:** `turbo_underboost` + `aftertreatment_derate` (cleanest
+separation, and they light up the two idle signals), as one phase with its own ADR;
+`injector_fouling` and any coolant-loss variant follow if the separation holds.
+
 ## MVP cut
 
 Phases 0–2 plus the obvious-outlier slice of Phase 3: a reproducible, documented,
