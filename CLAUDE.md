@@ -81,7 +81,7 @@ Downstream consumers import the library or read the tables.
 
 This is a career-showcase repo. When something genuinely CV/post-worthy appears (a
 clever standards-grounded technique, a shipped capability, a number), note it for
-`(private career repo)` — even unprompted. Sanitize to the public
+my private engineering-findings log — even unprompted. Sanitize to the public
 level (it is already clean-room; standard/method are free to mention).
 
 ## Definition of done (per feature)

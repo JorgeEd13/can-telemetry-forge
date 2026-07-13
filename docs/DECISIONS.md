@@ -33,8 +33,8 @@ API for the future consumer.
 expertise, and where a drift story (for the future MLOps repo) is natural.
 
 **Decision.** Heavy-equipment fleet telemetry with a predictive-maintenance
-framing. Adjacent to the user's real fleet domain but with **zero** private / GPS /
-the employer data.
+framing. Adjacent to the author's professional fleet domain but with **zero**
+private, GPS, or employer data.
 
 **Consequences.** Domain depth is showable; drift is naturally demonstrable
 downstream (sensors degrade, climate shifts). Requires care to stay clean-room.
