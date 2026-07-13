@@ -26,27 +26,39 @@ downstream machine-learning or data-quality work.
 **The data is the product.** The model that consumes it can be deliberately
 boring — the point is a dataset that is *diverse, statistically credible, and
 fully reproducible*, so the pipeline around it (training, monitoring, drift
-detection) has something real to work on. This generator is built to be the **data
-source for a companion MLOps project** (training → tracking → registry → serving →
-drift monitoring), with `--season` as the knob that demo will shift.
+detection) has something real to work on.
 
-> ✅ **Honest status — the MVP (Tier 1) ships.** One command generates a complete,
-> reproducible dataset: a realistically composed fleet (vehicle-class mix, age curve
-> with a legacy tail, regional deployment) of units emitting the 11 J1939-grounded
-> signals over time — gated by CAN capability era (unsupported signals are `NULL`,
-> never zero) — with a **multi-mode failure label**, a **registry of labeled
-> defects** (obvious + joint/contextual outliers, stuck/drift/dropout sensor faults,
-> and Tier-3 **CAN-frame faults**, each recoverable from an `anomaly_type` label), and
-> tidy Parquet / CSV / DuckDB tables plus a manifest and a generated data dictionary.
-> Same config + seed → byte-identical output, and `forge validate` reports the
-> distributions as plausible (in-spec + drift-free offline, with an opt-in CC-BY
-> real-data overlap). **The planned roadmap (F0–F6) is complete** (see
-> [`docs/ROADMAP.md`](docs/ROADMAP.md)): Tier-2 diversity (regions, equipment models,
-> seasons) shipped in F5; Tier-3 CAN-frame faults + a J1939 frame-level encoder
-> shipped in F6. **v0.2.0** then added **progressive pre-failure degradation**
-> (ADR-020) — the failing mode's signature now *builds toward* the event, making the
-> target genuinely learnable (a downstream model goes from chance ≈ 0.55 to ≈ 0.82
-> ROC-AUC).
+> **The upstream half of a pair.** Its companion
+> **[`forge-pdm-mlops`](https://github.com/JorgeEd13/forge-pdm-mlops)** is the
+> ML-in-production system built on this data — train → registry → serve → drift →
+> retrain, with a [live interactive demo](https://forge-pdm-mlops-958199756179.us-central1.run.app/demo).
+> `--season` is the knob that drives its drift story.
+> *Built the data engine, then the ML system over it.*
+
+---
+
+## Quickstart
+
+```bash
+pip install -e .
+forge generate --out out/          # a full, reproducible PdM dataset
+forge validate --data out/         # check it against the J1939 spec
+```
+
+Same config + seed → **byte-identical** output. More knobs:
+
+```bash
+forge generate --config configs/fleet.json --seed 42 --format duckdb
+forge generate --season heatwave --out out/     # shift the whole fleet's distribution
+forge generate --emit-raw-frames --out out/     # raw J1939 CAN frames as an artifact
+```
+
+> **The honesty boundary.** 100% **synthetic**, **clean-room** — modelled from the public
+> **SAE J1939** standard and documented physics, never from a real log. The one real dataset
+> that appears (a CC-BY public one) is used **only** to sanity-check distributions, fetched at
+> run time, never committed. Roadmap **F0–F6 complete** ([`docs/ROADMAP.md`](docs/ROADMAP.md)).
+
+---
 
 ## Why it's credible (and clean-room)
 
