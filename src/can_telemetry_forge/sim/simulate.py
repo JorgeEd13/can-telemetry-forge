@@ -42,7 +42,7 @@ def _merge_hazard_mults(*mults: dict[str, float]) -> dict[str, float]:
     result carries every known :data:`FAILURE_MODES` mode (so callers can index it
     safely) as the product across inputs.
     """
-    merged = {mode: 1.0 for mode in FAILURE_MODES}
+    merged = dict.fromkeys(FAILURE_MODES, 1.0)
     for m in mults:
         for mode, value in m.items():
             if mode in merged:

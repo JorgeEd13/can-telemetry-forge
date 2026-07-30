@@ -158,4 +158,4 @@ DEFAULT_ANOMALY_RATES: dict[str, float] = {
 }
 
 
-__all__ = ["AnomalyLabels", "apply_anomalies", "DEFAULT_ANOMALY_RATES"]
+__all__ = ["DEFAULT_ANOMALY_RATES", "AnomalyLabels", "apply_anomalies"]

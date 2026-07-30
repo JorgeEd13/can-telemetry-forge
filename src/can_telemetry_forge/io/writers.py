@@ -71,7 +71,7 @@ _WRITERS = {"parquet": _write_parquet, "csv": _write_csv, "duckdb": _write_duckd
 def _anomaly_type_counts(ds: SimulatedDataset) -> dict[str, int]:
     """Row count per labeled defect type (ADR-016), for provenance."""
     if ds.readings.empty or "anomaly_type" not in ds.readings:
-        return {atype: 0 for atype in ANOMALY_TYPES}
+        return dict.fromkeys(ANOMALY_TYPES, 0)
     counts = ds.readings["anomaly_type"].value_counts()
     return {atype: int(counts.get(atype, 0)) for atype in ANOMALY_TYPES}
 

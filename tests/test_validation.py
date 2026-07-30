@@ -10,20 +10,19 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from validation import compare_distributions, render_report, run_validation
+from validation.compare import histogram_overlap, summarise_signal
+from validation.reference import (
+    OFFLINE_ADAPTERS,
+    REFERENCE_ADAPTERS,
+)
+from validation.reference import (
+    run_validation as run_validation_direct,
+)
 
 from can_telemetry_forge.cli import main
 from can_telemetry_forge.config import config_from_dict
 from can_telemetry_forge.signals import get_spec, signal_names
-
-from validation import compare_distributions, render_report, run_validation
-from validation.compare import histogram_overlap, summarise_signal
-from validation.reference import (
-    GOLDEN_PROFILE,
-    OFFLINE_ADAPTERS,
-    REFERENCE_ADAPTERS,
-    _check_ved,
-    run_validation as run_validation_direct,
-)
 
 
 # A deliberately tiny fleet (one small contract) so each validation run simulates in
@@ -140,6 +139,7 @@ def test_ved_degrades_when_fetch_fails(tmp_path, monkeypatch) -> None:
     # never raises, never fakes a result. We force the failure deterministically so
     # the test is offline regardless of whether `kaggle` is installed or authed.
     import validation.reference as ref
+
     from can_telemetry_forge.sim import simulate
 
     def _boom(cache_dir, handle=None):
@@ -169,8 +169,8 @@ def test_ved_overlap_with_a_fake_local_csv(tmp_path, monkeypatch) -> None:
     # With a cached CSV present, no network is touched (the fetch branch is skipped),
     # and the adapter computes real overlap on the mapped engine channels.
     import pandas as pd
-
     import validation.reference as ref
+
     from can_telemetry_forge.sim import simulate
 
     cache = tmp_path / "ved"

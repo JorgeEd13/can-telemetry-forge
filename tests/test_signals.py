@@ -17,9 +17,9 @@ import numpy as np
 import pytest
 
 from can_telemetry_forge.signals import (
-    Era,
     TIER1_SIGNALS,
     DriverSeries,
+    Era,
     era_for_model_year,
     gated_signal_names,
     generate_unit,
@@ -29,10 +29,6 @@ from can_telemetry_forge.signals import (
     supports,
 )
 from can_telemetry_forge.signals.spec import (
-    DRIVER_ALTITUDE_M,
-    DRIVER_AMBIENT_C,
-    DRIVER_TERRAIN_ROUGHNESS,
-    DRIVER_WEAR,
     SignalSpec,
 )
 

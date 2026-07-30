@@ -33,8 +33,8 @@ Contract (ADR-006, extended by ADR-016):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 
@@ -134,20 +134,20 @@ class AnomalyInjector:
 
 
 __all__ = [
-    "NO_ANOMALY",
-    "OBVIOUS_OUTLIER",
-    "JOINT_OUTLIER",
-    "SENSOR_STUCK",
-    "SENSOR_DRIFT",
-    "SENSOR_DROPOUT",
+    "ANOMALY_TYPES",
     "CAN_FRAME_CORRUPT",
-    "CAN_FRAME_STALE",
     "CAN_FRAME_ERROR_INDICATOR",
+    "CAN_FRAME_STALE",
     "CAN_FRAME_TRUNCATED",
     "CAN_FRAME_TYPES",
-    "ANOMALY_TYPES",
+    "JOINT_OUTLIER",
+    "NO_ANOMALY",
+    "OBVIOUS_OUTLIER",
+    "SENSOR_DRIFT",
+    "SENSOR_DROPOUT",
+    "SENSOR_STUCK",
     "VALUE_DISTORTION_TYPES",
-    "InjectionHit",
-    "InjectFn",
     "AnomalyInjector",
+    "InjectFn",
+    "InjectionHit",
 ]

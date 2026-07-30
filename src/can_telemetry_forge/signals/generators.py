@@ -32,7 +32,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .eras import supports
-from .spec import Era, SignalSpec, TIER1_SIGNALS, get_spec
+from .spec import TIER1_SIGNALS, Era, SignalSpec, get_spec
 
 # --- physical/plausibility constants (first-pass, refined in F5) --------------
 # Engine speed

@@ -17,7 +17,7 @@ dictionary share one definition of the era boundaries.
 
 from __future__ import annotations
 
-from .spec import Era, SignalSpec, signal_names, get_spec
+from .spec import Era, SignalSpec, get_spec, signal_names
 
 # Model-year boundaries for the coarse eras (DATA_DESIGN §4). Inclusive lower
 # bounds: [.., 2004] Legacy, [2005, 2014] Mid, [2015, ..] Modern.
@@ -61,7 +61,7 @@ def gated_signal_names(unit_era: Era) -> tuple[str, ...]:
 
 __all__ = [
     "era_for_model_year",
-    "supports",
-    "supported_signal_names",
     "gated_signal_names",
+    "supported_signal_names",
+    "supports",
 ]

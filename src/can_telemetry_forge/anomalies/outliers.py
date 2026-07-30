@@ -35,8 +35,13 @@ def inject_obvious_outliers(
     """
     if rate <= 0.0:
         return {}
+    # A None array means the signal does not exist for this unit's era. It has no
+    # rows to be eligible, so it gets an empty mask — the injector skips it either
+    # way. The previous form read `np.zeros(arr.shape[0]) if arr is None`, which
+    # dereferenced `arr` on exactly the branch where it is None; it never fired
+    # because no caller had yet passed a None signal here.
     eligible = {
-        name: np.zeros(arr.shape[0], dtype=bool) if arr is None else ~np.isnan(arr)
+        name: np.zeros(0, dtype=np.bool_) if arr is None else ~np.isnan(arr)
         for name, arr in signals.items()
     }
     hits = INJECTOR_BY_TYPE[OBVIOUS_OUTLIER].inject(signals, eligible, rate, rng)

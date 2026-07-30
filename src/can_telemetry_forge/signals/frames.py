@@ -147,11 +147,11 @@ def frame_to_hex(frame: bytes | bytearray) -> str:
 __all__ = [
     "MAX_FRAME_BYTES",
     "NA_BYTE",
-    "value_to_raw",
-    "raw_to_value",
-    "encode_signal_frame",
-    "decode_signal_frame",
-    "frame_to_hex",
-    "_na_raw",
     "_error_raw",
+    "_na_raw",
+    "decode_signal_frame",
+    "encode_signal_frame",
+    "frame_to_hex",
+    "raw_to_value",
+    "value_to_raw",
 ]

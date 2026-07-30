@@ -188,6 +188,11 @@ def _inject_truncated(
             continue
         spec = get_spec(name)
         layout = spec.layout
+        if layout is None:
+            # No declared byte/bit placement (ADR-019) means there is no frame
+            # field to truncate. Injecting anyway would label a fault that the
+            # encoder cannot express, so the honest action is to skip.
+            continue
         # A signal whose field already fits in the truncated DLC can't lose its bits;
         # skip it so the fault is honest (its decode would still be valid).
         if layout.start_bit // 8 + layout.bit_len // 8 <= _TRUNCATE_TO_BYTES:

@@ -27,7 +27,6 @@ from can_telemetry_forge.anomalies.spec import (
 )
 from can_telemetry_forge.config import config_from_dict
 from can_telemetry_forge.io import write_dataset
-from can_telemetry_forge.sim import simulate
 from can_telemetry_forge.signals import (
     TIER1_SIGNALS,
     decode_signal_frame,
@@ -44,6 +43,7 @@ from can_telemetry_forge.signals.frames import (
     value_to_raw,
 )
 from can_telemetry_forge.signals.spec import Era
+from can_telemetry_forge.sim import simulate
 
 # Bus signals (those that got a frame layout in F6).
 _BUS_SIGNALS = tuple(s.name for s in TIER1_SIGNALS if s.layout is not None)
@@ -115,7 +115,7 @@ def test_truncated_frame_decodes_to_nan_for_a_late_field() -> None:
 
 
 def _modern_signals(days: int = 8, resolution: str = "5min", seed: int = 0):
-    from can_telemetry_forge.config import SEASONS, default_config
+    from can_telemetry_forge.config import SEASONS
     from can_telemetry_forge.sim import build_fleet
     from can_telemetry_forge.sim.drivers import drivers_for_unit
 
@@ -188,7 +188,7 @@ def test_stale_freezes_the_value_over_a_segment() -> None:
 
 def test_frame_faults_only_touch_bus_signals() -> None:
     signals, n = _modern_signals()
-    rates = {t: 0.02 for t in CAN_FRAME_TYPES}
+    rates = dict.fromkeys(CAN_FRAME_TYPES, 0.02)
     rates[CAN_FRAME_STALE] = 0.004
     labels = apply_anomalies(signals, rates, _frame_rngs(), n)
     for hit in labels.hits:
@@ -197,7 +197,7 @@ def test_frame_faults_only_touch_bus_signals() -> None:
 
 
 def test_frame_injection_is_reproducible() -> None:
-    rates = {t: 0.02 for t in CAN_FRAME_TYPES}
+    rates = dict.fromkeys(CAN_FRAME_TYPES, 0.02)
     s1, n = _modern_signals(seed=3)
     s2, _ = _modern_signals(seed=3)
     l1 = apply_anomalies(s1, rates, _frame_rngs(7), n)

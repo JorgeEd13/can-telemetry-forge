@@ -13,14 +13,14 @@ The pieces:
 
 from __future__ import annotations
 
-from .fleet import Unit, build_fleet
 from .drivers import drivers_for_unit
+from .fleet import Unit, build_fleet
 from .simulate import SimulatedDataset, simulate
 
 __all__ = [
+    "SimulatedDataset",
     "Unit",
     "build_fleet",
     "drivers_for_unit",
-    "SimulatedDataset",
     "simulate",
 ]

@@ -411,7 +411,7 @@ def _check_ved(
     )
     try:
         ved = _load_ved_frame(cache_dir, handle=resolved)
-    except BaseException as exc:  # noqa: BLE001 - opt-in: degrade, never crash the run
+    except BaseException as exc:
         # BaseException (not just Exception) on purpose: the kaggle client can raise
         # SystemExit at import/auth time when unauthenticated. This adapter is opt-in
         # and must never take down the (always-valid) offline validation with it.
@@ -536,14 +536,14 @@ def run_validation(
 
 
 __all__ = [
-    "CheckResult",
-    "ReferenceResult",
-    "ReferenceAdapter",
-    "ValidationRun",
-    "REFERENCE_ADAPTERS",
-    "OFFLINE_ADAPTERS",
-    "GOLDEN_PROFILE",
     "DEFAULT_VED_HANDLE",
+    "GOLDEN_PROFILE",
+    "OFFLINE_ADAPTERS",
+    "REFERENCE_ADAPTERS",
+    "CheckResult",
+    "ReferenceAdapter",
+    "ReferenceResult",
+    "ValidationRun",
     "get_adapter",
     "run_validation",
 ]

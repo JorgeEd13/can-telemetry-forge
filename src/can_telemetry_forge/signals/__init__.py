@@ -8,22 +8,12 @@ the registry to introspect the schema (SPN/unit/range/era) without generating.
 
 from __future__ import annotations
 
-from .spec import (
-    Era,
-    FrameLayout,
-    SignalSpec,
-    TIER1_SIGNALS,
-    SIGNALS_BY_NAME,
-    signal_names,
-    get_spec,
-)
 from .eras import (
     era_for_model_year,
-    supports,
-    supported_signal_names,
     gated_signal_names,
+    supported_signal_names,
+    supports,
 )
-from .generators import DriverSeries, generate_unit
 from .frames import (
     decode_signal_frame,
     encode_signal_frame,
@@ -31,24 +21,34 @@ from .frames import (
     raw_to_value,
     value_to_raw,
 )
+from .generators import DriverSeries, generate_unit
+from .spec import (
+    SIGNALS_BY_NAME,
+    TIER1_SIGNALS,
+    Era,
+    FrameLayout,
+    SignalSpec,
+    get_spec,
+    signal_names,
+)
 
 __all__ = [
+    "SIGNALS_BY_NAME",
+    "TIER1_SIGNALS",
+    "DriverSeries",
     "Era",
     "FrameLayout",
     "SignalSpec",
-    "TIER1_SIGNALS",
-    "SIGNALS_BY_NAME",
-    "signal_names",
-    "get_spec",
-    "era_for_model_year",
-    "supports",
-    "supported_signal_names",
-    "gated_signal_names",
-    "DriverSeries",
-    "generate_unit",
-    "encode_signal_frame",
     "decode_signal_frame",
-    "value_to_raw",
-    "raw_to_value",
+    "encode_signal_frame",
+    "era_for_model_year",
     "frame_to_hex",
+    "gated_signal_names",
+    "generate_unit",
+    "get_spec",
+    "raw_to_value",
+    "signal_names",
+    "supported_signal_names",
+    "supports",
+    "value_to_raw",
 ]

@@ -130,7 +130,7 @@ def compare_distributions(
 
 __all__ = [
     "SignalComparison",
+    "compare_distributions",
     "histogram_overlap",
     "summarise_signal",
-    "compare_distributions",
 ]

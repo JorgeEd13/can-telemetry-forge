@@ -74,7 +74,7 @@ def render_report(run: ValidationRun, *, datasets: tuple[str, ...] = ()) -> str:
     """Render ``run`` to a Markdown string."""
     cfg = run.config
     overall = _PASS if run.passed else _FAIL
-    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = _dt.datetime.now(_dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     ran = [r.adapter for r in run.results if r.available and r.checks]
     failed = [r.adapter for r in run.results if r.available and r.checks and not r.passed]

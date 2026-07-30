@@ -21,7 +21,9 @@ proprietary source is used.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from typing import Literal
+
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -77,7 +79,7 @@ class FrameLayout:
     bit_len: int
     scale: float
     offset: float
-    byte_order: str = "little"
+    byte_order: Literal["little", "big"] = "little"
     frame_bytes: int = 8
 
 
@@ -294,16 +296,16 @@ def get_spec(name: str) -> SignalSpec:
 
 
 __all__ = [
+    "DRIVER_ALTITUDE_M",
+    "DRIVER_AMBIENT_C",
+    "DRIVER_DUTY",
+    "DRIVER_TERRAIN_ROUGHNESS",
+    "DRIVER_WEAR",
+    "SIGNALS_BY_NAME",
+    "TIER1_SIGNALS",
     "Era",
     "FrameLayout",
     "SignalSpec",
-    "TIER1_SIGNALS",
-    "SIGNALS_BY_NAME",
-    "signal_names",
     "get_spec",
-    "DRIVER_AMBIENT_C",
-    "DRIVER_ALTITUDE_M",
-    "DRIVER_TERRAIN_ROUGHNESS",
-    "DRIVER_DUTY",
-    "DRIVER_WEAR",
+    "signal_names",
 ]

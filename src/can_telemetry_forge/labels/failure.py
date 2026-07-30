@@ -249,7 +249,7 @@ def apply_degradation(
         (idx >= start) & (idx <= event), progress ** _DEGRADATION_SHAPE, 0.0
     )
 
-    for name, peak in _DEGRADATION.get(labels.event_mode, ()):  # type: ignore[union-attr]
+    for name, peak in _DEGRADATION.get(labels.event_mode, ()):
         series = out.get(name)
         if series is None:
             continue  # era-gated off for this unit → no drift for this channel
@@ -259,4 +259,4 @@ def apply_degradation(
     return out
 
 
-__all__ = ["FAILURE_MODES", "UnitLabels", "derive_unit_labels", "apply_degradation"]
+__all__ = ["FAILURE_MODES", "UnitLabels", "apply_degradation", "derive_unit_labels"]

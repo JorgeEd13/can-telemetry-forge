@@ -8,7 +8,6 @@ import pytest
 
 from can_telemetry_forge.config import (
     RESOLUTION_STEP_HOURS,
-    ForgeConfig,
     config_from_dict,
     default_config,
     load_config,

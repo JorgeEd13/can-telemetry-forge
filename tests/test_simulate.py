@@ -17,7 +17,13 @@ from can_telemetry_forge.anomalies import inject_obvious_outliers
 from can_telemetry_forge.config import SEASONS, config_from_dict, default_config
 from can_telemetry_forge.labels import FAILURE_MODES, apply_degradation, derive_unit_labels
 from can_telemetry_forge.labels.failure import _DEGRADATION
-from can_telemetry_forge.signals import Era, era_for_model_year, generate_unit, get_spec, signal_names
+from can_telemetry_forge.signals import (
+    Era,
+    era_for_model_year,
+    generate_unit,
+    get_spec,
+    signal_names,
+)
 from can_telemetry_forge.sim import build_fleet, simulate
 from can_telemetry_forge.sim.drivers import drivers_for_unit
 

@@ -26,14 +26,14 @@ from can_telemetry_forge.anomalies.spec import (
     CAN_FRAME_TRUNCATED,
     JOINT_OUTLIER,
     OBVIOUS_OUTLIER,
-    SENSOR_DROPOUT,
     SENSOR_DRIFT,
+    SENSOR_DROPOUT,
     SENSOR_STUCK,
 )
-from can_telemetry_forge.config import SEASONS, config_from_dict, default_config
+from can_telemetry_forge.config import SEASONS, config_from_dict
+from can_telemetry_forge.signals import Era, generate_unit, get_spec
 from can_telemetry_forge.sim import build_fleet, simulate
 from can_telemetry_forge.sim.drivers import drivers_for_unit
-from can_telemetry_forge.signals import Era, generate_unit, get_spec
 
 _BASELINE = SEASONS["baseline"]
 
@@ -91,7 +91,7 @@ def test_obvious_outliers_are_out_of_range() -> None:
 def test_joint_outliers_stay_in_range_but_violate_context() -> None:
     # Inject ONLY joint outliers so we can read the contradiction cleanly.
     signals, n = _modern_unit_signals()
-    rates = {t: 0.0 for t in ANOMALY_TYPES}
+    rates = dict.fromkeys(ANOMALY_TYPES, 0.0)
     rates[JOINT_OUTLIER] = 0.5
     labels = apply_anomalies(signals, rates, _rngs(), n)
     joint_hits = [h for h in labels.hits if h.anomaly_type == JOINT_OUTLIER]
@@ -111,7 +111,7 @@ def test_joint_outliers_stay_in_range_but_violate_context() -> None:
 
 def test_sensor_dropout_blanks_to_null_and_is_not_an_outlier() -> None:
     signals, n = _modern_unit_signals()
-    rates = {t: 0.0 for t in ANOMALY_TYPES}
+    rates = dict.fromkeys(ANOMALY_TYPES, 0.0)
     rates[SENSOR_DROPOUT] = 0.003
     labels = apply_anomalies(signals, rates, _rngs(), n)
     drop_hits = [h for h in labels.hits if h.anomaly_type == SENSOR_DROPOUT]
@@ -125,7 +125,7 @@ def test_sensor_dropout_blanks_to_null_and_is_not_an_outlier() -> None:
 
 def test_sensor_stuck_freezes_a_constant_segment() -> None:
     signals, n = _modern_unit_signals()
-    rates = {t: 0.0 for t in ANOMALY_TYPES}
+    rates = dict.fromkeys(ANOMALY_TYPES, 0.0)
     rates[SENSOR_STUCK] = 0.003
     labels = apply_anomalies(signals, rates, _rngs(), n)
     stuck_hits = [h for h in labels.hits if h.anomaly_type == SENSOR_STUCK]
@@ -176,7 +176,7 @@ def test_era_gated_cells_are_never_targeted() -> None:
 
 def test_zero_rates_inject_nothing() -> None:
     signals, n = _modern_unit_signals()
-    rates = {t: 0.0 for t in ANOMALY_TYPES}
+    rates = dict.fromkeys(ANOMALY_TYPES, 0.0)
     labels = apply_anomalies(signals, rates, _rngs(), n)
     assert labels.hits == []
     assert not labels.is_outlier.any()

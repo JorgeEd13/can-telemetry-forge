@@ -27,8 +27,8 @@ from __future__ import annotations
 
 from .compare import SignalComparison, compare_distributions
 from .reference import (
-    REFERENCE_ADAPTERS,
     OFFLINE_ADAPTERS,
+    REFERENCE_ADAPTERS,
     ReferenceAdapter,
     ReferenceResult,
     get_adapter,
@@ -37,13 +37,13 @@ from .reference import (
 from .report import render_report
 
 __all__ = [
-    "SignalComparison",
-    "compare_distributions",
-    "REFERENCE_ADAPTERS",
     "OFFLINE_ADAPTERS",
+    "REFERENCE_ADAPTERS",
     "ReferenceAdapter",
     "ReferenceResult",
+    "SignalComparison",
+    "compare_distributions",
     "get_adapter",
-    "run_validation",
     "render_report",
+    "run_validation",
 ]

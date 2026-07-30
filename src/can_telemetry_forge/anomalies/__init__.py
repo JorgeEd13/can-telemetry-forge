@@ -16,7 +16,7 @@ mutual-exclusion eligibility and emits a single ``anomaly_type`` categorical
 
 from __future__ import annotations
 
-from .inject import AnomalyLabels, DEFAULT_ANOMALY_RATES, apply_anomalies
+from .inject import DEFAULT_ANOMALY_RATES, AnomalyLabels, apply_anomalies
 from .injectors import INJECTOR_BY_TYPE, INJECTORS
 from .outliers import inject_obvious_outliers
 from .spec import (
@@ -29,16 +29,16 @@ from .spec import (
 )
 
 __all__ = [
-    "apply_anomalies",
-    "AnomalyLabels",
+    "ANOMALY_TYPES",
+    "CAN_FRAME_TYPES",
     "DEFAULT_ANOMALY_RATES",
     "INJECTORS",
     "INJECTOR_BY_TYPE",
-    "AnomalyInjector",
-    "InjectionHit",
-    "ANOMALY_TYPES",
-    "CAN_FRAME_TYPES",
     "NO_ANOMALY",
     "VALUE_DISTORTION_TYPES",
+    "AnomalyInjector",
+    "AnomalyLabels",
+    "InjectionHit",
+    "apply_anomalies",
     "inject_obvious_outliers",
 ]
