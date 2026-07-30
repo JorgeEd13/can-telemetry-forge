@@ -590,3 +590,40 @@ deterministic function of the already-seeded labels/signals). The clean-room pro
 is untouched (documented physics, no real telemetry). The committed smoke fixture and
 the consumer's canonical dataset must be **regenerated** against this change (a
 deliberate, pinned data refresh — the consumer pins `can-telemetry-forge==0.1.0`).
+
+---
+
+## ADR-021 — Static analysis is a curated, enforced gate (and how it was almost not one)
+
+**Status:** Accepted · 2026-07-30
+
+**Context.** This repo had no `ruff`, no `mypy`, no lint gate — while every module carried
+`from __future__ import annotations` and thorough type hints. Hints nothing ever checks are
+documentation wearing a type system's clothes. An external review named it, correctly, as the
+cheapest rigor gap to close.
+
+**Decision.** ruff + mypy, enforced in CI as a **separate `lint` job** (not a matrix cell, so a
+failure names itself in the run list).
+
+- **Curated rule set, not `ALL`.** Every rule enabled is one this repo actually passes, so a red
+  gate always means a *new* defect and never a pre-existing backlog. Widening the set is a
+  deliberate change.
+- **`E501` is off, deliberately.** `ruff format` is NOT enforced: reformatting the codebase would
+  rewrite `git blame` across a commit log that is a working engineering record. Without a
+  formatter, line length is the least informative rule in the set, and the real violations left
+  are embedded markup, base64 assets and test fixtures — none of which read better wrapped.
+- **mypy targets 3.12**, not the 3.11 floor: numpy's shipped stubs use PEP 695 `type`
+  statements that mypy refuses to parse under an older target, and it aborts on the *stub* before
+  reaching any code here. 3.11 support is proven by the CI test matrix running there. This did
+  not reproduce locally, where the interpreter is newer than the configured target.
+
+**Consequences.**
+
+- The type hints became load-bearing. mypy's first run found **two latent crashes no test covered**: an inverted ternary in `anomalies/outliers.py` (`np.zeros(arr.shape[0]) if arr is None` dereferences `arr` on exactly the branch where it is None) and an unguarded `layout.start_bit` on a `FrameLayout | None` in `frame_faults.py`. Both are now fixed; `byte_order` was also narrowed to `Literal["little", "big"]` so the J1939 convention lives in the type, not a comment.
+- **The gate is only as good as the check that verifies it, and mine was broken.** I verified
+  locally with `ruff check . -q | grep '^Found'` — and `-q` *suppresses that very line*, so the
+  grep could never match and "clean" was printed unconditionally. CI failed minutes later on
+  findings that had been there the whole time. **Verify tools by exit code, never by grepping
+  their output**, and ask of any check: *if this were broken, would this line go red?*
+- **Adding a gate and not looking at its first run leaves it indistinguishable from a passing
+  one.** Poll `gh run list` in the same session that adds a workflow.
