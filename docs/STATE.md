@@ -121,7 +121,7 @@ Default fleet unchanged at **134 units**. **The planned roadmap (F0–F6) is com
     VED rows → all ved checks pass. Three run-time realities (ADR-017 addendum):
     Kaggle's new SDKs 403 on dataset downloads → fetch the **classic REST endpoint**
     (`www.kaggle.com/api/v1`) with **HTTP Basic auth** from `~/.kaggle/kaggle.json`
-    (only `requests` needed, SDKs dropped from the extra); Norton TLS interception →
+    (only `requests` needed, SDKs dropped from the extra); TLS termination →
     `pip-system-certs` (Windows trust store, not verify=False); the **VED handle is
     configurable** (`--ved-handle`/`FORGE_VED_HANDLE`/config, default verified
     `yashseth25/ved-segregated`) because the originally-assumed handle didn't exist.

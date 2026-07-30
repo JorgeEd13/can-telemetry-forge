@@ -409,7 +409,7 @@ detail a reader hits too):
    (`www.kaggle.com/api/v1/datasets/download/...`) with **HTTP Basic auth** from
    `~/.kaggle/kaggle.json` works. So the fetch calls that endpoint directly with
    `requests` (the only `validate`-extra dep) — lighter and more robust than the SDKs.
-2. *TLS interception.* On a managed Windows host, Norton's "SSL/TLS scanning"
+2. *TLS interception.* Where an endpoint security product terminates TLS, it
    presents its own CA, so `certifi` verification fails. Fix is environment-side
    (`pip-system-certs` → use the Windows trust store), **not** disabling verification.
    Noted so a future run on such a host knows the cause.

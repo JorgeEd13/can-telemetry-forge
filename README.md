@@ -199,7 +199,7 @@ their own (rationale in [ADR-017](docs/DECISIONS.md)).
 your **legacy** API credentials — put a `kaggle.json` (Kaggle → Settings → API →
 *Create Legacy API Key*) at `~/.kaggle/kaggle.json`. The dataset handle is
 configurable (`--ved-handle` / `FORGE_VED_HANDLE`), so a moved/renamed mirror is a
-flag change, not a code edit. (Behind a TLS-inspecting proxy, e.g. some corporate
+flag change, not a code edit. (Where TLS is terminated, e.g. some managed
 antivirus, install `pip-system-certs` so Python trusts the system certificate store.)
 
 ## Data tiers
