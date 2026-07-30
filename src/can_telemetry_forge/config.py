@@ -245,7 +245,7 @@ class ForgeConfig:
 
     def n_steps(self) -> int:
         """Number of timestamps per unit over the window."""
-        return int(round(self.days * 24.0 / self.step_hours()))
+        return round(self.days * 24.0 / self.step_hours())
 
     def rng(self) -> np.random.Generator:
         """The master seeded generator (ADR-005). Child rngs spawn from this."""

@@ -209,7 +209,7 @@ def test_degradation_ramps_the_winning_mode_signature_toward_the_event() -> None
 
 def test_degradation_stays_within_j1939_range() -> None:
     for seed in range(40):
-        signals, labels, degraded = _degraded_unit(seed)
+        _signals, labels, degraded = _degraded_unit(seed)
         if labels.event_index is None:
             continue
         for name in degraded:

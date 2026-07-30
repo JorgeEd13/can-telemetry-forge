@@ -264,7 +264,7 @@ def test_generators_do_not_depend_on_frame_layout() -> None:
     # value model reads SignalSpec ranges/eras, never the frame layout (ADR-013/-019).
     import dataclasses
 
-    signals_a, n = _modern_signals(seed=5)
+    signals_a, _n = _modern_signals(seed=5)
 
     # Monkeypatch the registry specs to drop layouts, regenerate, compare.
     originals = {s.name: s for s in TIER1_SIGNALS}

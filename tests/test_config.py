@@ -63,7 +63,7 @@ def test_invalid_config_raises(bad: dict) -> None:
 
 
 def test_invalid_fleet_references_raise() -> None:
-    base = default_config()
+    default_config()
     bad_fleet = {
         "contracts": [
             {"id": "x", "label": "x", "region_id": "nope", "units": 3, "duty_bias": 0.0}

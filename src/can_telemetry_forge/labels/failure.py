@@ -197,7 +197,7 @@ def derive_unit_labels(
     within = np.zeros(n, dtype=np.int8)
     mode_col = np.full(n, NO_FAILURE, dtype=object)
     if best_index is not None:
-        horizon_steps = int(round(horizon_h / step_hours))
+        horizon_steps = round(horizon_h / step_hours)
         start = max(0, best_index - horizon_steps)
         within[start : best_index + 1] = 1
         mode_col[start : best_index + 1] = best_mode

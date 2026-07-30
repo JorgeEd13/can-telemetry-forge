@@ -21,10 +21,9 @@ proprietary source is used.
 
 from __future__ import annotations
 
-from typing import Literal
-
 from dataclasses import dataclass
 from enum import Enum
+from typing import Literal
 
 
 class Era(Enum):
