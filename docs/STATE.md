@@ -257,6 +257,39 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   clipped to 0, with no contiguous shutdown; no golden test pins values (swapping the rpm/load draw
   order → 135 passed with every noisy value changed); effect of the 0 kPa oil floor on fault
   labels/anomalies not examined.
+- **R4-T3-a — misspelled config keys silently fall back to the default.** `config_from_dict`
+  keeps only six named top-level keys and `_fleet_from_dict` only reads known fleet keys; anything
+  else is dropped. `{"dayz": 7}` → `days == 90`; `{"Seed": 7}` → `seed == 42`;
+  `{"fleet": {"build_year_mde": 2000}}` → `build_year_mode == 2016`, no warning. Nested entries do
+  the opposite (`"sorce"` in a region → `TypeError` from the dataclass). The `_comment` key in
+  `configs/fleet.json` (ADR-015) relies on the lenient top level. Fix: reject unknown keys with a
+  `ValueError`, allowing `_`-prefixed keys.
+- **R4-T3-b — `validate()` checks references, not values or types; the provenance test checks
+  presence, not format.** Accepted by `config_from_dict`: a region with `source ""`,
+  `terrain_roughness 7.0` (docstring says `[0, 1]`) and `wear_modifier -2.0`; duplicate region and
+  contract ids; `"contracts": []` (0 units); `days: true` (1 day). A negative `vehicle_mix` weight
+  passes `validate()` and fails later in `build_fleet` with numpy's "Probabilities are not
+  non-negative"; `days: "7"` raises `TypeError`, not `ValueError`; `seed: 4.5` / `seed: -1` pass
+  `validate()` and fail in `rng()`. Replacing all six default region citations with `"n/a"` → 135
+  passed, and `simulate.py` writes `source` into the `regions` table. Fix: range/type checks on
+  region and top-level fields, unique ids, non-empty contracts, non-negative weights; a format check
+  on `source`.
+- **R4-T3-c — the default `vehicle_mix` dict is shared across `default_config()` calls.**
+  `default_config()` returns a new `ForgeConfig` around the same module-level `FleetSpec` and dict.
+  `default_config().fleet.vehicle_mix["support"] = 99.0` → the next `default_config()` returns 99.0
+  (was 0.14), and `config_from_dict` merges onto it. `anomaly_rates` uses a copying
+  `default_factory` and is not affected. Fix: build the default fleet per call, or store the mix as
+  an immutable mapping.
+- **R4-T3-d — DATA_DESIGN §3 says the class mix varies by contract and region; the schema has one
+  global mix.** `Contract` has only `duty_bias`, and `build_fleet` draws every unit with one weight
+  vector built from `FleetSpec.vehicle_mix` (`sim/fleet.py`, before the contract loop). ADR-011 says
+  "~100 units"; the default expects 140 since F5 (104 at F2). Fix: a per-contract mix override, or
+  reword §3; add a dated note to ADR-011.
+- Unverified leads from R4-T3: no size guard (`1s` × 90 days = 7,776,000 steps per unit); a
+  negative `units_per_contract_sd_frac` is accepted; the comment above the Tier-2 checks in
+  `validate()` promises a "fully covered" check the code does not make (no failure observed: `build_fleet` picks among a class's models, so any class with one model is covered); `arid_highland` cites Köppen
+  BWk with a 22 °C mean, above the 18 °C bound usually given for the "k" suffix; `altitude_m` and
+  `wear_modifier` cite no source; `SEASONS` entries may be shared the same way as the mix.
 
 ## Notes
 
