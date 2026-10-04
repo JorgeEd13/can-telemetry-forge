@@ -427,6 +427,38 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   config-validation and one type's monotonicity tests exist; no configured-rate assertion); the package docstring says "three defect families"
   (four since F6); `DEFAULT_ANOMALY_RATES` keys are string literals, not the constants;
   `test_injection_is_reproducible` doesn't compare `anomaly_signal`.
+- **R4-T8-a — the `hot_while_idle` joint rule labels normal readings as defects.** It writes
+  `-40 + 0.55 × 250` = 97.5 °C into `coolant_temp_c` where `engine_speed_rpm < 750`; the comment in
+  `injectors.py` says "~115 degC". Measured on the R4-T7 probe config (`days=10`, `5min`, `seed=7`,
+  126 units, clean signals snapshotted before `apply_anomalies`): among clean readings with
+  rpm < 750 the median coolant is 96.4 °C and 40.9 % are already ≥ 97.5 °C. This rule produces 1,237
+  of the 4,320 joint-outlier cells (28.6 %). `rpm < 750` includes a running engine at idle, where a
+  hot engine is normal; `DATA_DESIGN.md` says the pair is "impossible". Fix: calibrate the injected
+  value against the clean conditional distribution, and test it (above clean p99 in context).
+- **R4-T8-b — the other two joint rules are caught without context, and every obvious/joint value is a
+  constant.** Fuel writes 1,767.01 L/h; the clean generator's max on the same probe is 248.5 (p99
+  187.5). Boost writes 300.0 kPa; clean max 271.6 (p99 218.2). The `injectors.py` docstring and
+  `DATA_DESIGN.md` say "only a contextual check catches it" — a quantile check without context
+  separates both. The 9,351 obvious + joint cells on the probe carry 11 distinct values (one per
+  signal / per rule), so exact-value matching finds all of them. Fix: draw injected values from a
+  target band set by the clean distribution (above context p99, below overall p99).
+- **R4-T8-c — injector behaviour is mostly untested (5 of 6 mutations green).** Against the full
+  suite: `hot_while_idle` context relaxed to `rpm < 8100` → 135 passed; `_DRIFT_MAX_BIAS_FRAC = 0.0`
+  (drift does nothing) → 135 passed; segment mean/min 40/8 → 1/1 (per-cell salt, which ADR-016 rules
+  out) → 135 passed; fuel rule made to never match → 135 passed, because the context assertion in
+  `test_joint_outliers_stay_in_range_but_violate_context` sits inside `if fuel_hits:`. Only dropout
+  NaN → 0.0 goes red. Fix: assert the context of every joint rule unconditionally, drift moves the
+  segment's last cell, and segments are ≥ `_FAULT_SEGMENT_MIN_STEPS` long.
+- **R4-T8-d — the ADR-021 inverted-ternary regression is caught only by mypy.** Restoring
+  `np.zeros(arr.shape[0]) if arr is None` in `outliers.py` → 135 passed; `mypy` exits 1 (the CI
+  `lint` job runs it). No test calls `inject_obvious_outliers` with a `None` signal. Fix: one test
+  that does. Related, smaller: drift's ramp starts at 0, so the first cell of every drift segment is
+  labeled and unchanged (45 of 2,129 drift cells on the probe).
+- Unverified leads from R4-T8: the `injectors.py` docstring says "three defect families" (four with
+  F6); `_eligible_indices` is unused; names in `_OUTLIER_SIGNALS` / `_SENSOR_SIGNALS` aren't checked
+  against the signal registry (a typo skips the signal silently); stuck freezes at `values[start-1]`,
+  which can be another defect's cell; the joint rule's driver cell isn't reserved, so a later
+  stuck/drift can undo a labeled contradiction; the joint constants' "refined in F5" comment is stale.
 
 ## Notes
 
