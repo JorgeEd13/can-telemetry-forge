@@ -459,6 +459,43 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   against the signal registry (a typo skips the signal silently); stuck freezes at `values[start-1]`,
   which can be another defect's cell; the joint rule's driver cell isn't reserved, so a later
   stuck/drift can undo a labeled contradiction; the joint constants' "refined in F5" comment is stale.
+- 🔴 **URGENT (public README claim) — R4-T9-a — `can_frame_stale` writes a value its own frame
+  doesn't decode to.** `_inject_stale` writes the pre-encoding float (`values[i] = held_value`) but
+  records the quantized `held_frame`. Measured (`{"days": 10, "resolution": "5min", "seed": 7}`,
+  2,866 frames, each decoded back and compared to `readings`): 803 of 932 stale cells (86.2 %)
+  differ from `decode(frame_hex)`, by at most 1.88 (within half a quantum); the other three families
+  match in every cell. The README ("decoded back — exactly what a receiver sees"), ADR-019 and the
+  module docstring say otherwise. Holding the current value instead of the previous one → 135 passed.
+  Fix: write `decode(held_frame)`; a test that every `can_frames` row decodes to the table value.
+- **R4-T9-b — `can_frame_corrupt` rarely decodes out of range, and no test checks the value
+  changed.** The docstring and ADR-019 say a byte flip decodes to an "out-of-range / implausible"
+  value; in the same probe 1,146 of 1,240 corrupt cells (92.4 %) decode inside the signal's spec
+  range (88 outside, 6 NULL). `test_corrupt_distorts_a_value_and_records_a_frame` ends in
+  `… or hit.mask.sum() >= 1`, which always holds; allowing a zero XOR mask → 135 passed. The 6 NULL
+  corrupt cells carry `is_outlier = True`. Fix: describe the class accurately; assert decoded ≠ clean.
+- **R4-T9-c — only the top two raw codes are sentinels; J1939-71 reserves bands, and
+  `can_frame_error_indicator` never emits the error code.** The decoder treats `raw ≥ max−1` as NULL;
+  J1939-71 reserves `0xFB–0xFF` (1 byte) and `0xFB00–0xFFFF` (2 bytes), and `frames.py`'s own docstring
+  names the `0xFExx` error band. The encoder clamps at 253 / 65,533, above the 250 / 64,255 valid
+  ceiling. 11 of 1,240 corrupt frames land in a reserved raw and decode as values. All 522
+  error-indicator frames carry raw 255 or 65,535 (not available), never `0xFE` / `0xFFFE`. Fix: model
+  the bands in `raw_to_value`, clamp at the valid ceiling, emit the error code for that family.
+- **R4-T9-d — `_FRAME_SIGNALS` is a hand-typed list, and truncation reaches 3 of 8 bus signals.**
+  The comment says adding a layout to a new signal makes it targetable; the tuple is 8 literal names
+  filtered by layout. Removing `egt_c` → 135 passed (`test_frame_faults_only_touch_bus_signals` checks
+  target ⇒ layout, not layout ⇒ target). `_TRUNCATE_TO_BYTES = 3` is the truncated length, not "how
+  many bytes shorter" as commented, so only rpm, oil pressure and EGT can be truncated (68 / 67 / 37
+  in the probe; the other five, 0) — undocumented. The test comment puts EGT at "bytes 6-7"; it is
+  5–6. Fix: iterate the registry; document or vary the truncated length.
+- **R4-T9-e — the ADR-021 `start_bit` guard is unreachable, and the same access is unguarded in
+  `_corrupt_byte`.** `if layout is None: continue` in `_inject_truncated` never runs (the target
+  list is already filtered); removing it → pytest 135 passed, mypy 2 errors. `_corrupt_byte`'s
+  `layout` parameter is unannotated, so mypy treats it as `Any`; `mypy --disallow-untyped-defs`
+  flags it. ADR-021 says "Both are now fixed". Fix: annotate `layout: FrameLayout` and narrow once.
+- Unverified leads from R4-T9: stale holds `values[start-1]`, which may be another defect's cell; a
+  stale segment starting at step 0 labels an unchanged cell; the round-trip test skips the low clamp
+  and the top of range; `test_nan_value_encodes_to_not_available_frame` never checks the bytes;
+  `MAX_FRAME_BYTES` is not enforced by the codec; `can_frames` carries no identifier/PGN.
 
 ## Notes
 
