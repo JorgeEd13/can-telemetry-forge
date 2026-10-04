@@ -290,6 +290,42 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   `validate()` promises a "fully covered" check the code does not make (no failure observed: `build_fleet` picks among a class's models, so any class with one model is covered); `arid_highland` cites Köppen
   BWk with a 22 °C mean, above the 18 °C bound usually given for the "k" suffix; `altitude_m` and
   `wear_modifier` cite no source; `SEASONS` entries may be shared the same way as the mix.
+- **R4-T4-a — ADR-005, DATA_DESIGN §11, ARCHITECTURE and DATA_DICTIONARY describe a single
+  generator; the code spawns a seed tree.** All four say one seeded generator is threaded through
+  every stage; `simulate()` builds a `SeedSequence` and spawns one child for the fleet plus one per
+  unit per stage (described correctly only in `docs/ROADMAP.md`, this file, and partly in the
+  ADR-019 note on per-injector streams). `ForgeConfig.rng()` ("Child rngs spawn from this")
+  has no callers in `src/` or `tests/`. Replacing the spawn tree with one shared
+  `default_rng(config.seed)` → 135 passed, and append stability (below) drops from 126/126 units unchanged
+  to 0 (the replacement also changes the fleet itself: 137 units instead of 126). Byte-identical output itself holds: two processes with different `PYTHONHASHSEED`, same
+  config → identical sha256 for all 8 output files, CSV and Parquet (DuckDB not checked). Fix:
+  amend ADR-005 with a dated note, fix §11 and ARCHITECTURE, delete or wire `rng()`.
+- **R4-T4-b — per-unit streams are keyed by position, so growing the anomaly registry reseeds the
+  dataset.** A unit's block starts at `i * _STREAMS_PER_UNIT`, and `_STREAMS_PER_UNIT = 3 +
+  len(ANOMALY_TYPES)`. Probe config (`days 2`, `5min`, seed 7, 126 units): one extra stream slot
+  (what a 6th injector does, even at rate 0) → 125/126 units get different signals and anomalies,
+  135 passed. An extra contract appended at the end → 126/126 units unchanged; the same contract
+  prepended → 2/126 unchanged. No pinned golden exists (the `golden` validator recomputes its
+  reference). The simulate docstring's "a unit's data never depends on how many units preceded it"
+  holds only for appends. Fix: key child sequences by a stable name (unit, stage), or pin a small
+  dataset hash.
+- **R4-T4-c — the stream layout is untested.** Setting `_STREAM_LABELS` equal to `_STREAM_SIGNALS`
+  (labels draw from the signal stream) → 135 passed, 4/126 units change; `base = i` instead of
+  `i * _STREAMS_PER_UNIT` (neighbouring units share streams across stages) → 135 passed.
+  `test_simulate_is_reproducible` only checks same seed → same output, which both mutations still
+  satisfy. Fix: a test that the (unit, stage) stream indices are disjoint, plus the append-stability
+  check from R4-T4-b.
+- **R4-T4-d — a negative `units_per_contract_sd_frac` silently disables contract-size variation.**
+  `_contract_unit_count` uses `max(expected * sd_frac, 1e-9)` as the spread, so a negative fraction
+  becomes ~0 and every contract gets exactly its expected size (read, not run; this explains the
+  "exactly 140 units" lead from R4-T3). Fix: reject negative values in `validate()`.
+- Unverified leads from R4-T4: a model `build_year_min` above `build_year_max` hands
+  `rng.triangular` a left bound above the right; the conditional model draw in `build_fleet` shifts
+  the fleet stream when a class gets its first model; `_HOURS_PER_YEAR` in `sim/fleet.py` is unused;
+  the comment on `_ANNUAL_RUNTIME_MEAN_H` describes hours rising with age, which the code does not
+  do; the ARCHITECTURE pipeline diagram places anomaly injection before label derivation (code and
+  ADR-009 do the reverse); `test_era_gated_signals_are_null_not_zero` asserts nothing when the seed
+  draws no Legacy unit.
 
 ## Notes
 
