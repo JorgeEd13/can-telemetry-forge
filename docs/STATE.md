@@ -225,6 +225,38 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   against the registry/`DRIVER_*` constants; the `Era.MODERN` comment lists
   "after-treatment" as an item beyond DEF; no other after-treatment signal (e.g. DPF) is in
   the registry.
+- **R4-T2-a — oil pressure reads 0 kPa on a running engine in ~41 % of readings.**
+  `_oil_pressure_kpa` is `100 + 350·rpm_frac − 180·wear`; at idle it goes negative once wear
+  exceeds (100 + model offset)/180 — ~0.56 with no offset, 0.46–0.64 across the fleet's model
+  offsets — and the J1939 clamp returns 0. Measured on `default_config()` (142 units × 129,600
+  one-minute steps, study seeds, not the `simulate()` streams): 41.1 % of oil readings are exactly
+  0 — 70.4 % of off-shift minutes vs under 0.1 % on-shift; 58.2 % for units starting at wear 1.0 vs
+  30.6 % for the rest. The range test runs after the clamp, and the correlation test's scenario
+  stays near 104 kPa, so neither sees it. The "oil falls with wear" relation is flat for the most
+  worn units. Fix: a physical idle floor or a saturating wear term; a test on the fraction of
+  readings at the range boundary.
+- **R4-T2-b — 54 of 142 default-fleet units start the window at wear 1.0, and wear growth is
+  untested.** 64 of 142 end at 1.0. Freezing wear at its start value
+  (`accumulated_h = unit.runtime_start_h + 0.0 * t_h`) → 135 passed: the monotonic test accepts
+  a constant series and the region test compares rates. The `drivers.py` docstring says a harsh
+  high-hour unit "approaches" full wear. Fix: rescale `_WEAR_FULL_SCALE_H` against the fleet's
+  runtime distribution; assert `wear[-1] > wear[0]` for an unsaturated unit.
+- **R4-T2-c — seasonal phase is drawn per unit, not per region.** Within one region the 90-day
+  mean ambient differs between units by up to 36.0 °C (`alpine_subarctic`, amplitude 20); 10.2 °C
+  in `tropical_humid`, the smallest. Season is a property of the place (ADR-010). The module
+  docstring also says duty jitter is the only randomness. Fix: draw the phase once per region.
+- **R4-T2-d — correlation tests assert sign, not strength; DATA_DESIGN §5 says both.** Both
+  scenarios in `mean_of` share one seed (common random numbers), so any positive difference
+  passes: `_EGT_ALT_GAIN_C_PER_KM` 18 → 0.001 → 135 passed. Fix: assert a band on the difference,
+  or reword §5.
+- Unverified leads from R4-T2: the comment above the per-signal functions says they run "in
+  registry order" and that the registry is in dependency order — neither holds (`coolant_temp_c`
+  precedes `engine_load_pct` in the registry; `generate_unit` hard-codes its own order); coolant
+  is a linear sum with no thermostat regulation; documented dependencies with no implementation
+  (rpm ← load, coolant ← runtime, oil ← oil temp); "engine off" exists only where duty jitter is
+  clipped to 0, with no contiguous shutdown; no golden test pins values (swapping the rpm/load draw
+  order → 135 passed with every noisy value changed); effect of the 0 kPa oil floor on fault
+  labels/anomalies not examined.
 
 ## Notes
 
