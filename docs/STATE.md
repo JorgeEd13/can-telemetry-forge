@@ -396,6 +396,37 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   ADR-020; the `span <= 0` guard in `apply_degradation` is unreachable for labels built by `derive_unit_labels` (reachable only with hand-built `UnitLabels`); the tests' `small_config`s (24–48 h)
   are shorter than the 168 h horizon, so every test window starts at row 0 and the ramp is compressed (not measured on the
   90-day default).
+- **R4-T7-a — 🔴 URGENT — "every injected defect is recoverable" is false in the emitted dataset.**
+  README L155, ADR-006 and the `anomalies/inject.py` docstring promise full recoverability; the
+  dataset carries one `anomaly_type`/`anomaly_signal` per row and the per-cell `hits` are dropped
+  inside `simulate()` (only CAN-frame hits survive, and only with `--emit-raw-frames`). Probe
+  (`days 10`, `5min`, seed 7, default rates, 126 units): 18,022 defect cells, 384 rows with defects
+  on two or more signals (380 on two, 4 on three), 388 cells named by no label column; 281 of them
+  hold in-range values (joint 108, stuck 38, drift 47, corrupt 47, stale 41), so a range check
+  can't recover them either. The manifest's per-type counts are
+  winning-row counts (they sum to 17,634 = rows with at least one defect). Fix: a long-format per-cell labels table
+  (`unit_id, t_index, signal, anomaly_type`), or reword the claim.
+- **R4-T7-b — the row-collision rule ("injector priority = registry order") is untested.**
+  Making the last injector win (`unclaimed = hit.mask`) → 135 passed; the readings change
+  (sha256 differs) and rows with `is_outlier` true under a non-distorting label go 3 → 75. The
+  docstring's "dropout last" is stale: the CAN-frame injectors come after it. Fix: one hand-built
+  row with two defects, assert the winner.
+- **R4-T7-c — the orchestrator's era-gate is dead code.** Starting `eligible` as all-true for every
+  signal → 135 passed and byte-identical readings; the live guard is each injector's
+  `values is None` skip. Fix: test each guard in isolation, or keep one.
+- **R4-T7-d — the "rollup over all distorting cells" semantics of `is_outlier` is untested.**
+  Rolling up only the winning cells (`is_outlier |= unclaimed`) → 135 passed (3 rows differ in the
+  probe). The test comment at `test_anomalies.py` L218–222 describes the semantics; its asserts
+  hold under both versions.
+- **R4-T7-e — `test_at_most_one_defect_per_row` doesn't test exclusion.** Per row it is
+  tautological; per cell it doesn't look. Removing the eligibility shrink fails only
+  `test_obvious_outliers_are_out_of_range` (a later fault overwrites a spike); the probe shows
+  45 doubly-defective cells. Its comment promises "no outlier flag" for clean rows and doesn't
+  assert it. Fix: assert per-signal hit masks are pairwise disjoint.
+- Unverified leads from R4-T7: ADR-006 says tests assert each type "at its configured rate" (presence, zero-rate,
+  config-validation and one type's monotonicity tests exist; no configured-rate assertion); the package docstring says "three defect families"
+  (four since F6); `DEFAULT_ANOMALY_RATES` keys are string literals, not the constants;
+  `test_injection_is_reproducible` doesn't compare `anomaly_signal`.
 
 ## Notes
 
