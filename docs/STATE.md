@@ -326,6 +326,44 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   do; the ARCHITECTURE pipeline diagram places anomaly injection before label derivation (code and
   ADR-009 do the reverse); `test_era_gated_signals_are_null_not_zero` asserts nothing when the seed
   draws no Legacy unit.
+- **R4-T5-a — no test proves the model or season hazard multipliers reach the failure label.**
+  Tests cover `_merge_hazard_mults` and `derive_unit_labels` called with a hand-made multiplier;
+  nothing runs `simulate()` with a multiplier that changes an assertion. Dropping
+  `unit.hazard_mult` from the merge in `simulate()` → 135 passed; dropping
+  `config.season.hazard_mult` → 135 passed. Probe config (`days 4`, `5min`, seed 7, 126 units):
+  neutralising every catalog model multiplier moves failure-labelled rows from 3071 to 3680 (9
+  failing units either way). Fix: an end-to-end test that runs the simulator with an extreme model
+  and season and asserts the failing-unit count moves.
+- **R4-T5-b — the heatwave end-to-end test uses a non-monotone oracle.**
+  `test_heatwave_raises_overheat_hazard_end_to_end` compares the sum of `failure_within_h` rows,
+  which counts the hours before a failure, so earlier failures mean fewer positive rows. Probe
+  config: a season with `overheat: 1e6` makes 126/126 units fail and positive rows drop to 187
+  (baseline: 3071 rows, 9 units). The ambient shift alone already satisfies the assertion
+  (heatwave without its hazard multiplier: 4270 rows, 12 units; full heatwave: 4993 rows, 15
+  units). Fix: assert on failing-unit count, and isolate the multiplier from the ambient effect.
+- **R4-T5-c — `SEASONS` presets are shared mutable state.** `resolve_season("heatwave")` returns the
+  module-level object, and `Season.hazard_mult` is a plain dict inside a frozen dataclass. Setting
+  `config.season.hazard_mult["overheat"] = 99.0` on one config makes the next
+  `config_from_dict({"season": "heatwave"})` in the same process carry `overheat: 99.0`.
+  `test_resolve_season_named_and_inline` asserts the identity. Equipment models do not have this
+  problem (`build_fleet` copies the dict). Confirms the R4-T3 lead on shared `SEASONS` entries.
+  Fix: return a copy, or store multipliers in a read-only mapping.
+- **R4-T5-d — the catalog's value guards are untested, and the wear check is non-strict.**
+  Removing both non-negativity checks in `validate()` → 135 passed (the checks themselves work: a
+  season with `overheat: -1.0` raises `ValueError`). Ignoring `season.wear_mult` in
+  `sim/drivers.py` → 135 passed, because `test_season_shifts_ambient_and_wear` asserts `>=`.
+  Validation checks names and sign only: `overheat: 1e6` is accepted. Fix: tests for the negative
+  cases, a strict or banded wear assertion, and range bounds on multipliers.
+- **R4-T5-e — the `cold_snap` preset leaves every label unchanged on the probe config.** Baseline
+  vs `cold_snap` (`days 4`, `5min`, seed 7): `failure_within_h` and `failure_mode` columns are
+  identical, while mean `coolant_temp_c` drops from 105.05 to 103.87. Cause not investigated
+  (hypothesis: identical per-step draws plus modest multipliers rarely move the first crossing).
+  Matters for the planned drift demo: this preset shifts features without shifting labels at this
+  horizon. Fix: measure label shift per preset over a longer window before relying on it.
+- Unverified leads from R4-T5: the `Season.wear_mult` docstring says it scales the wear hazard
+  gain, while `sim/drivers.py` multiplies the wear accumulation rate; `wear_mult` has no effect on a
+  unit already clipped at wear 1.0; a NaN multiplier passes the `v < 0` check;
+  `_merge_hazard_mults` drops unknown modes silently when called without `validate()`.
 
 ## Notes
 
