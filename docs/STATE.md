@@ -364,6 +364,38 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   gain, while `sim/drivers.py` multiplies the wear accumulation rate; `wear_mult` has no effect on a
   unit already clipped at wear 1.0; a NaN multiplier passes the `v < 0` check;
   `_merge_hazard_mults` drops unknown modes silently when called without `validate()`.
+- **R4-T6-a — the ADR-020 degradation ramp has no effective test.** Making `apply_degradation`
+  return the unmodified copy (no ramp at all) → 135 passed. The ramp test accepts zero drift
+  (`abs(delta[event]) >= abs(delta[start])` and `... or delta[event] == 0.0`), and its
+  `delta[:start]` check is vacuous because every test window starts at row 0. Turning the ramp into
+  a step (`_DEGRADATION_SHAPE = 0.0`) fails only through float rounding
+  (`27.999999999999986 >= 28.0`). Fix: assert the drift at the event is close to the configured
+  peak (unless clamped) and grows across the window.
+- **R4-T6-b — the ramp test inspects one failure mode.** It returns after the first failing seed
+  (seed 17, `overheat`) and reads the expected sign from the `_DEGRADATION` map it is testing.
+  Flipping `oil_starve` to `+180.0` → 135 passed. Fix: hard-code the physical direction per mode in
+  the test and build one labelled case per mode.
+- **R4-T6-c — "pure function (no mutation)" (ADR-020) is untested.** Replacing the copy with an
+  in-place add (`series += ramp * peak`) → 135 passed; the ramp test then compares the array with
+  itself. `simulate()` reassigns `signals`, so output data is unaffected today. Fix: assert the
+  input arrays are unchanged after degrading a failing unit.
+- **R4-T6-d — post-event behaviour is undefined and undocumented.** After the sampled event the unit
+  keeps running, labelled 0, and the ramp drops to 0 on the next step. Probe config (`days 4`,
+  `5min`, seed 7): the 9 failing units run 316–1086 rows past the event; coolant on u0017 goes
+  149.2 → 120.7 °C in one step. Neither README.md nor the design docs (DATA_DESIGN, DECISIONS) say what happens after a failure. Fix: decide and document
+  a policy (truncate at the event, or explicit repair with a post-event column).
+- **R4-T6-e — label tests skip or pass vacuously when no unit fails.** With `_WEAR_GAIN = 0.0` the
+  run is 2 failed, 131 passed, 2 skipped: both degradation tests skip instead of failing.
+  `test_failure_mode_is_valid_and_horizon_marked` (`if ... is not None`) and the Legacy test would
+  also pass without asserting anything if their seeds stopped failing (read, not measured). Fix: pin
+  a seed that fails and assert that it does.
+- DATA_DESIGN §7 lists oil temperature ("climbing oil temp", "rising oil temp") as part of the
+  overheat and oil-starvation signatures, but the generator has no oil-temperature signal at all.
+- Unverified leads from R4-T6: the module docstring says hazards use "signals + wear + age", while age enters only as
+  the starting wear; the "first-pass, refined in F5" comment on the hazard constants is stale per
+  ADR-020; the `span <= 0` guard in `apply_degradation` is unreachable for labels built by `derive_unit_labels` (reachable only with hand-built `UnitLabels`); the tests' `small_config`s (24–48 h)
+  are shorter than the 168 h horizon, so every test window starts at row 0 and the ramp is compressed (not measured on the
+  90-day default).
 
 ## Notes
 
