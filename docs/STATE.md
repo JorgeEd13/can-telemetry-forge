@@ -2,6 +2,13 @@
 
 Updated: 2026-06-26
 
+> 🧊 **FROZEN for feature work since 2026-10-03 — study block open.** This repo was cut into
+> **12 territories** by the APROFUNDAMENTOS programme (`repo-base-career/sistema/APROFUNDAMENTOS_ROADMAP.md`
+> §R4). While the block is open, that programme reads this code line by line and measures its
+> guards by mutation, so a moving tree would invalidate the measurements. Findings from the study
+> go to this file's backlog rather than being fixed there. The freeze lifts when the R4 block
+> closes. It is a *convention*, not a mechanism — nothing enforces it; Jorge can lift it by saying so.
+
 ## Current focus
 
 **Post-F6 realism fix — progressive pre-failure degradation (ADR-020), v0.2.0.**
@@ -193,6 +200,31 @@ committed:
 - Polish: a `forge` example that round-trips a frame in the README; optional Tier-3
   frame-fault tuning if VED-style validation reveals gaps.
 Pick a direction with Jorge before starting — F6 closed a clean boundary.
+
+### Study backlog (APROFUNDAMENTOS R4)
+
+Findings from the line-by-line study. Recorded, **not fixed** — they are discharged in one
+repo session after the R4 block closes. Measured against the full suite (baseline 135 passed).
+
+- **R4-T1-a — the data dictionary has no guard against the registry.** `signals/spec.py`
+  says `DATA_DICTIONARY.md` "is generated to match it" and `signals/eras.py` says the
+  dictionary, generators and gate "can never silently disagree"; the dictionary is
+  hand-written and no test reads it. Moving `boost_pressure_kpa` from `Era.MID` to
+  `Era.LEGACY` → 135 passed, dictionary still says Mid. No test pins the full era × signal
+  table either (the Legacy test checks 4 of the 6 signals that should be gated; the
+  supported/gated partition test holds for any era assignment). Fix: a parse-and-compare
+  test, or generate the table from the registry; correct both docstrings.
+- **R4-T1-b — `test_pgn_recorded_but_inert_by_default` checks neither.** It asserts that
+  *any* J1939 signal has a PGN. Setting 7 of the 8 PGNs to `None` → 135 passed; making
+  `generate_unit` scale a signal by its PGN → 135 passed. ADR-013 ("a test asserts … the
+  generator does not depend on them") and the `FrameLayout` docstring overstate it, and
+  `DATA_DICTIONARY.md` says F6 "activated" the PGN — F6 activated the `layout`; no code
+  outside `spec.py` reads `.pgn`. Fix: assert every SPN-backed signal has a PGN, and test
+  generator output is unchanged when PGNs are stripped.
+- Unverified leads from the same study: `SignalSpec.drivers` names are not validated
+  against the registry/`DRIVER_*` constants; the `Era.MODERN` comment lists
+  "after-treatment" as an item beyond DEF; no other after-treatment signal (e.g. DPF) is in
+  the registry.
 
 ## Notes
 
