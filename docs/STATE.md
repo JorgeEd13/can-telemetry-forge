@@ -496,6 +496,56 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   stale segment starting at step 0 labels an unchanged cell; the round-trip test skips the low clamp
   and the top of range; `test_nan_value_encodes_to_not_available_frame` never checks the bytes;
   `MAX_FRAME_BYTES` is not enforced by the codec; `can_frames` carries no identifier/PGN.
+- **R4-V1 — blind VERIFY over T1–T9.** Two blind instances (one on the code, one on the tests), then
+  `auditor-claims`. Items already in R4-T1…T9 are not repeated here. Measured on `configs/fleet.json`
+  (134 units, 30 days, `5min`) unless stated. Six generation test files
+  (`tests/test_{signals,simulate,config,diversity,anomalies,frames}.py`) = 104 passed at baseline.
+- **R4-V1-a — frame-fault cells can be found by quantization alone.** Every `can_frame_corrupt` cell
+  (3,632 of 3,632, all 8 bus signals) sits exactly on its signal's J1939 resolution grid
+  (`offset + k·resolution`), because it was decoded from a frame; clean values never pass through the
+  encoder, and 0.000 % of clean `coolant_temp_c`, `engine_speed_rpm` and `egt_c` are exactly on-grid.
+  A model can recover the label with a modulo test and no CAN knowledge. Fix: quantize every bus
+  signal through the codec (what a receiver actually sees), or document the leak.
+- **R4-V1-b — the failure label is mostly unpinned.** Each of these, alone, leaves the six files at 104
+  passed: the failure row itself not marked; the latest failure mode winning instead of the earliest;
+  the warning window doubled; `apply_degradation` not called in `simulate()`.
+  `test_failure_mode_is_valid_and_horizon_marked` asserts nothing **today**: with its seed,
+  `event_index` is `None` and the body under `if ... is not None` never runs (sharpens R4-T6-e).
+  Fix: hand-built labels with a known event; assert horizon length and mode precedence.
+- **R4-V1-c — the `can_frames` artifact is barely pinned.** Each leaves the six files at 104 passed:
+  recording the uncorrupted frame for a corrupt cell; `t_index` off by one; recording a valid frame
+  for an error-indicator cell. Fix: decode every `can_frames` row and compare to `readings` at
+  `(unit_id, t_index, signal)` with an outer join.
+- **R4-V1-d — diurnal phase and duty.** Ambient peaks at 06:00 in 600 of 600 unit-days; the hour meter
+  advances a median 681 of 720 wall-clock hours in 30 days (~8,292 h/yr) against
+  `_ANNUAL_RUNTIME_MEAN_H = 1800`, because duty is above 0 on almost every step. Fix: peak mid-afternoon;
+  model off periods.
+- **R4-V1-e — failure counts depend on resolution.** All anomaly rates 0, 30 days: 54 of 134 units
+  fail at `5min`, 59 of 134 at `1min`. Cause not investigated (lead: per-step hazard not scaled by
+  step length). Fix: a test that the failing-unit count is resolution-invariant within a band.
+- **R4-V1-f — drift and stuck magnitudes.** One drift segment shifted `engine_speed_rpm` by 3,212.8
+  rpm; segment length is fixed in steps (mean 44.8 at `5min` = 3.7 h, 43.4 at `1min` = 0.7 h), so the
+  "slow" drift gets 5× faster at `1min`. With `obvious_outlier=0.05`, `sensor_stuck=0.002`: 5,818 of
+  141,691 `sensor_stuck` cells (4.1 %) are frozen at an out-of-range value, i.e. another defect's spike
+  (confirms the R4-T8/T9 lead). Fix: segment length in time; freeze from the clean value.
+- **R4-V1-g — failure mode is confounded with era.** The bearing hazard reads vibration, which only
+  MODERN units report: bearing failures LEGACY 0, MID 0, MODERN 18 (19 / 50 / 65 units). A model can
+  learn era → mode. Fix: a wear-driven bearing path for non-MODERN units, or document it.
+- **R4-V1-h — config edges not covered by R4-T3/T5.** `season.wear_mult = NaN` passes `validate()` and
+  yields NaN in 100 % of coolant, oil-pressure and vibration values with 0 failing units (confirms the
+  R4-T5 lead). Build years after 2025 are accepted and those units get age 0 (`_REFERENCE_YEAR = 2025`
+  is hard-coded; 39 units built 2026–2032 all at `age_days 0.0`). Disabling the unknown-`vehicle_mix`
+  check, accepting a zero-unit contract, accepting `failure_horizon_h = 0`, or accepting a negative
+  outlier rate each leaves the six files at 104 passed. Fix: tests for each validator branch and its
+  boundary; derive the reference year from config.
+- **R4-V1-i — signal tests that can't fail.** Each leaves `test_signals.py` green: removing the range
+  clamp (the range test's stressed inputs peak at 2,048 rpm against an 8,031.875 ceiling;
+  `test_simulate.py::test_degradation_stays_within_j1939_range` does catch it); fuel rate ignoring rpm;
+  a flat hour meter (the monotonic test accepts a constant). Fix: stress to the ceiling; assert
+  strict growth and the fuel–rpm relation.
+- Unverified-cause lead from R4-V1 (timing measured): at `1min`, 30 days, a run takes ~2 s with
+  anomalies off and ~44 s at default rates; `_fault_segments` is 47.6 of 51.9 profiled seconds
+  (per-step Python loop).
 
 ## Notes
 
