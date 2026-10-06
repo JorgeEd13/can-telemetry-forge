@@ -650,6 +650,51 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   manifest keys are read by any test (by grep); the dictionary's defect list is hand-written while its
   table row is derived from `ANOMALY_TYPES`.
 
+- **R4-V2 — blind VERIFY over T10–T12.** Two blind instances (one on the code, one on the tests), then
+  `auditor-claims`. Items already in R4-T10…T12 are not repeated here. "The three files" =
+  `tests/test_{validation,writers,cli}.py` = 31 passed at baseline (full suite 135).
+- **R4-V2-a — an unknown `--dataset` name is a warning, then PASS and exit 0.** Measured:
+  `forge validate --dataset nosuch` → stderr "unknown dataset 'nosuch', skipping.", "PASS", rc 0, report
+  "Overall: all checks passed". Same family as R4-T10-c; fix together (argparse `choices` from the
+  adapter registry).
+- **R4-V2-b — validation passes by vacuity on degenerate data.** Measured on `GOLDEN_PROFILE`: with every
+  row `is_outlier=True`, `in_spec` produces 0 checks and the run passes; with `engine_speed_rpm` all NULL
+  from the generator (fresh process), in_spec drops 11→10 checks and golden 9→8, and the run passes. The
+  golden result is `lru_cache`d and regenerated independently, so NULLs only in the validated readings
+  drop in_spec alone. Fix: a signal that should exist for the era and has no values is a failure, and an
+  adapter with 0 checks is not a pass.
+- **R4-V2-c — the `ved` comparison uses unmasked generated data.** `in_spec` excludes injected-defect
+  rows; the `ved` path does not. Measured (default config, loader stubbed): 17,366,400 generated rows
+  reach the comparison, 671,506 of them `is_outlier`; `engine_speed_rpm` max 12,048.8 vs spec max
+  8,031.875, 34,724 values above it. Combined with R4-T10-b, these values stretch the overlap grid. Fix:
+  apply the same clean-row mask before comparing.
+- **R4-V2-d — the pass/fail gate has no test and no CI step.** Measured, each alone → full suite 135
+  passed: `ValidationRun.passed` always `True`; `_run_validate` always returning 0; `_check_in_spec`
+  ignoring values below the minimum. `ci.yml` never runs `forge validate`, and mypy (`files = ["src"]`)
+  does not cover the top-level `validation/` package: an injected `x: int = "str"` in
+  `validation/compare.py` still gives "Success: no issues found in 22 source files". Fix: a test that
+  feeds a failing dataset and asserts rc ≠ 0; add `validation` to mypy `files`.
+- **R4-V2-e — CSV and Parquet do not read back the same.** Measured with pandas on `GOLDEN_PROFILE`
+  (2 days, 6 units, seed 1234, 3,456 rows): CSV `anomaly_type` `""` → NaN in 3,212 rows (Parquet keeps
+  `""`); `t_index` Parquet int32 vs CSV int64; `failure_within_h` Parquet int8 vs CSV int64;
+  `failure_mode` CSV float64 vs Parquet object (config-dependent: on `configs/fleet.json` both are object,
+  with a mixed-types `DtypeWarning` on CSV). The data dictionary's "empty" label is not what a CSV reader
+  sees. Fix: document the CSV read dtypes (or ship a `dtype=` map), or write a sentinel instead of `""`.
+- **R4-V2-f — writer and manifest output is mostly unpinned.** Each alone leaves the three files at 31
+  passed: never writing `can_frames`; the Parquet writer skipping every table except `readings`; the
+  DuckDB writer creating only `readings`; manifest `n_failure_rows` forced to 0; manifest `days` off by
+  one; manifest anomaly-type counts all zero. The round-trip test compares only `readings` row counts.
+- **R4-V2-g — CLI flags are unpinned.** Each alone leaves the three files at 31 passed: ignoring
+  `--season`, ignoring `--emit-raw-frames`, validate dropping `--dataset`. `tests/test_cli.py` run alone
+  (7 passed) kills none of six CLI mutations (those three, validate always 0, validate or generate
+  ignoring `--seed`); the seed mutations are caught only by tests in other files.
+- **R4-V2-h — comparison and report rendering are unpinned.** Each alone leaves the three files at 31
+  passed: `compare_distributions` ignoring the reference sample; `summarise_signal` p50 and p95 swapped;
+  the report rendering no distribution tables. Extends R4-T10-b: `histogram_overlap(zeros(1000),
+  normal(1500, 300, 1000) + [1e6])` = 0.9990 (1000/1001); without the extreme value, 0.0.
+- Unverified lead from R4-V2 (read): `__version__ = "0.2.0"` in `src/can_telemetry_forge/__init__.py`
+  duplicates `pyproject.toml`.
+
 ## Notes
 
 - No GPU, no paid services, no training tokens — local NumPy/pandas; CI is free.
