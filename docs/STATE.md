@@ -615,6 +615,40 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   only a few vehicles if the file is sorted by trip; the member is picked by a "combustion" substring in
   the file name, else the first CSV; a handle without "/" degrades with an opaque unpack error when credentials exist (without them, the
   missing-`kaggle.json` error hides it; with a cached `<handle>.zip`, no error at all).
+- **R4-T12-a — the output directory is never cleaned, so a previous run's tables sit next to the new
+  manifest.** `write_dataset` does `mkdir(exist_ok=True)` and overwrites only same-name files (DuckDB:
+  `CREATE OR REPLACE` only for this run's tables). Measured: Parquet + raw frames (seed 7), then CSV
+  (seed 8) into the same `--out` → 15 files; the manifest says `csv`/seed 8/`emit_raw_frames: false`
+  next to a `readings.parquet` from seed 7 (36,288 rows) and a `can_frames.parquet` (275 rows). Fix:
+  refuse a non-empty out dir (or `--overwrite`), write to a temp dir and rename, list written files
+  (with hashes) in the manifest.
+- **R4-T12-b — `n_can_frames` counts frames that were not written.** `_manifest` reads
+  `ds.can_frames.shape[0]`, which is populated with `emit_raw_frames` off. Measured: `emit_raw_frames:
+  false` with `n_can_frames: 227` and no `can_frames` table from that run. `test_frames.py` asserts the
+  count only in the flag-on case. Fix: count what `_tables()` actually wrote.
+- **R4-T12-c — the manifest cannot reproduce the run.** It records the seed and part of the config, but
+  not the fleet composition (contracts/regions/units) or the generator version, although the writers
+  docstring says "config echo" and DATA_DESIGN §11 says everything regenerates from config + seed.
+  Measured: same seed, one contract in `temperate_lowland` vs `alpine_subarctic` → different `readings`,
+  identical manifests (all 18 keys). Fix: serialize the resolved config and `__version__`.
+- **R4-T12-d — the CLI hardcodes its own `--format` choices instead of `FORMATS`.** Measured: adding
+  `"xml"` to the CLI list → full suite green (135 passed); `forge generate --format xml` then fails
+  inside `write_dataset` with a `ValueError` traceback (exit 1) instead of an argparse usage error
+  (exit 2). Fix: `choices=FORMATS`, plus a test. `--resolution`/`--season` repeat lists owned by
+  `config.py` (not measured).
+- **R4-T12-e — exit 1 means both "validation failed" and "any uncaught error".** Measured:
+  `forge validate --config /nope.json` → 1, `forge generate --out X --config /nope.json` → 1,
+  `generate --out X --days 0` → 1 (traceback); validation failure returns `_VALIDATION_FAILED_EXIT = 1`
+  (read from the code, not run). Fix: a distinct code for validation failure, and translate config/input errors in
+  `main` into their own code with a one-line message. Pairs with R4-T10-c.
+- **R4-T12-f — no test distinguishes `_write_utf8`'s `stream.buffer` path.** Measured: replacing it with
+  a plain `stream.write(text)` → 135 passed on Linux. Fix: a test that writes into a cp1252
+  `TextIOWrapper` and asserts UTF-8 bytes, no exception.
+- Unverified leads from R4-T12: the write is not atomic (tables, then manifest, then dictionary — a
+  crash mid-write leaves a previous run's manifest over partial tables); `tests/test_cli.py` docstring
+  still says "no generation exists yet"; `_ = get_spec` keeps an unused import alive; only 8 of the 18
+  manifest keys are read by any test (by grep); the dictionary's defect list is hand-written while its
+  table row is derived from `ANOMALY_TYPES`.
 
 ## Notes
 
