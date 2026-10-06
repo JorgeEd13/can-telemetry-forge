@@ -579,6 +579,42 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   `GOLDEN_PROFILE` is a mutable module-level dict; the registry's `check=_check_ved` is never called
   (the orchestrator dispatches `ved` by name); the golden table shows `n = 0` next to a real mean; an
   available adapter with zero checks renders as ✅ (`all([])`).
+- **R4-T11-a — the `ved` cache trusts file existence, so a partial download or an error body is
+  cached as the dataset.** `_download_ved_zip` writes straight to the final `<owner>__<slug>.zip` and
+  `_load_ved_frame` skips the network whenever that file exists. Measured with a fake response that
+  drops mid-stream: 9,252 of 18,505 bytes written, then `BadZipFile` on every later run with one
+  network call in total, even after the network recovers. Removing `raise_for_status()` caches a 403
+  body (34 bytes) the same way and leaves `tests/test_validation.py` at 17 passed. Fix: download to
+  `*.part`, `os.replace` on success, delete on failure, and check `zipfile.is_zipfile` before trusting
+  the cache.
+- **R4-T11-b — a mirror without the mapped columns reads every column and reports `ved` available with
+  zero checks.** `usecols=present or None` turns "no wanted column" into "all columns"; the comparison
+  loop skips silently; the result is `available=True`, `checks=[]`, which the roll-up ignores.
+  Measured: a CSV with columns `RPM, Load, X` → all three read, 0 comparisons, 0 checks,
+  `run_validation(..., datasets=("ved",))` → `passed=True`. Fix: zero mapped columns = unavailable
+  with a note naming the expected columns (pairs with R4-T10-c).
+- **R4-T11-c — `except BaseException` in `_check_ved` swallows Ctrl-C, and its rationale is stale.**
+  Measured: a `KeyboardInterrupt` raised inside the load returns `available=False` and execution
+  continues. The comment justifies it with `SystemExit` from the `kaggle` client, which is no longer
+  imported; narrowing to `Exception` leaves 17 passed. Same family: the `_download_ved_zip` docstring
+  calls `requests` a `kagglehub` transitive dependency, but `pyproject.toml` declares it directly in the
+  `[validate]` extra and does not declare `kagglehub` at all.
+- **R4-T11-d — the `ved` tests mock the code they claim to cover.** `test_ved_overlap_with_a_fake_local_csv`
+  says the cached path skips the network, but it replaces `_load_ved_frame` entirely and writes a
+  `.csv` the real loader (which looks for `<owner>__<slug>.zip`) would never read. No test mentions
+  `_download_ved_zip`, `_read_ved_master`, `_kaggle_basic_auth` or `_VED_MIN_OVERLAP`. Measured:
+  `_VED_MIN_OVERLAP` 0.30 → 0.0, removing the cache short-circuit, and removing `raise_for_status()`
+  each leave 17 passed; only inverting handle precedence fails a test. Fix: a local zip fixture and a
+  fake HTTP response at the transport level so the real loader, cache and threshold run.
+- **R4-T11-e — ADR-017 and the adapter comments describe more than the code.** They mention a
+  `ved_handle` config key that `config.py` does not have (only `--ved-handle` and `FORGE_VED_HANDLE`
+  exist, as the README correctly says); the ADR context lists four overlapping channels (RPM, load,
+  fuel rate, coolant) while `_VED_COLUMN_MAP` compares two; `MAF_g_per_sec` is read "for the report's
+  context" and never used.
+- Unverified leads from R4-T11: `nrows=200_000` takes the first rows of the master CSV, which may cover
+  only a few vehicles if the file is sorted by trip; the member is picked by a "combustion" substring in
+  the file name, else the first CSV; a handle without "/" degrades with an opaque unpack error when credentials exist (without them, the
+  missing-`kaggle.json` error hides it; with a cached `<handle>.zip`, no error at all).
 
 ## Notes
 
