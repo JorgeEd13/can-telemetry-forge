@@ -547,6 +547,39 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   anomalies off and ~44 s at default rates; `_fault_segments` is 47.6 of 51.9 profiled seconds
   (per-step Python loop).
 
+- 🔴 **URGENT (public README claim) — R4-T10-a — the `golden` adapter compares nothing; it is not a
+  drift guard.** Its only check is that each signal's mean on the regenerated fixed profile lies inside
+  its J1939 range (`validation/reference.py` L256); the std is computed and never checked, and there is
+  no expected value or tolerance. Every generator output is already clipped to that range, so the mean
+  is in range by construction. Measured: adding +40 °C to the coolant formula moves the golden coolant
+  mean from 101 to 142.5 and leaves the suite at 135 passed; removing the clamp from every generator
+  fails 0 golden checks. The README ("per-signal summary stats match a pinned, recomputed reference
+  run (catches silent drift…)"), ADR-017, ROADMAP F4, the package/module docstrings and the adapter
+  description ("seed-stable") say otherwise. Fix: freeze per-signal mean/std/p05/p95 of the golden
+  profile as literals in a test with a relative tolerance; add a test that a shifted generator fails.
+- **R4-T10-b — the histogram-overlap bin grid comes from the pair's own min/max.** One extreme value
+  stretches the grid and collapses both samples into one bin. Measured (5,000-sample normals, seed 0):
+  N(0,1) vs N(1,1) = 0.610; the same pair plus a single value of 1,000 = 1.000. Two identical
+  constants score 0.0 (degenerate range), and an empty side is 0.0 here but `None` in
+  `summarise_signal`. Tests cover only identical / disjoint / empty. Fix: anchor the grid to the spec
+  range or reference percentiles; return `None` for "cannot compare".
+- **R4-T10-c — a requested but unavailable `ved` still yields PASS and exit 0.** `ValidationRun.passed`
+  ignores unavailable adapters. Measured: `run_validation(..., datasets=("ved",))` with no Kaggle
+  credentials and an empty cache → `passed=True`, `ved` `available=False`. The report summary says
+  "all checks passed". Fix: a distinct outcome (or exit code) when a requested dataset did not run.
+- **R4-T10-d — validation tests that cannot fail.** The signal loop in
+  `test_report_is_self_contained_markdown` asserts nothing (its comment describes an assertion that
+  was never written); `test_golden_drift_guard_passes` only asserts the pass; adding three CAN signals
+  to `_FLEET_DERIVED` drops 3 golden checks and leaves `tests/test_validation.py` at 17 passed.
+- **R4-T10-e — the README says `in_spec` checks "every value"; it checks rows without an injected
+  defect.** Rows flagged `is_outlier` are excluded for all signals (deliberately: without the mask,
+  six signals fail on the one-day test config). Fix: say "every clean value" in the README.
+- Unverified leads from R4-T10: golden stats include injected anomalies (no clean-row mask, unlike
+  `in_spec`); the golden `@lru_cache` serves a stale result if the generator is patched in-process;
+  `GOLDEN_PROFILE` is a mutable module-level dict; the registry's `check=_check_ved` is never called
+  (the orchestrator dispatches `ved` by name); the golden table shows `n = 0` next to a real mean; an
+  available adapter with zero checks renders as ✅ (`all([])`).
+
 ## Notes
 
 - No GPU, no paid services, no training tokens — local NumPy/pandas; CI is free.
