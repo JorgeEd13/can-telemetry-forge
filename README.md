@@ -31,7 +31,7 @@ detection) has something real to work on.
 > **The upstream half of a pair.** Its companion
 > **[`forge-pdm-mlops`](https://github.com/JorgeEd13/forge-pdm-mlops)** is the
 > ML-in-production system built on this data — train → registry → serve → drift →
-> retrain, with a [live interactive demo](https://forge-pdm-mlops-958199756179.us-central1.run.app/demo).
+> retrain, with a [live interactive demo](https://jorgeed-forge-pdm-mlops.hf.space/demo).
 > `--season` is the knob that drives its drift story.
 > *Built the data engine, then the ML system over it.*
 
