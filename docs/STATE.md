@@ -34,9 +34,8 @@ New backlog from the same pass (not fixed):
   change (stuck at the same value, a drift ramp's first step, clamped drift, a stale
   frame that quantizes to the original). Correct for "every injected defect"; worth one
   sentence in the dictionary.
-- The golden pins were generated on Python 3.14 + numpy 2.5.4; whether the CI matrix
-  (3.11/3.12, whatever numpy pip resolves) reproduces them to 1e-4 of the span is
-  proven only by the first CI run.
+- ✅ The golden pins (generated on Python 3.14 + numpy 2.5.4) reproduce on the whole CI
+  matrix — Ubuntu/Windows × py3.11/3.12 all green on `137eca7`.
 
 **Previous focus:**
 
