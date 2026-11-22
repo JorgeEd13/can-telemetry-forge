@@ -1,6 +1,6 @@
 # State — can-telemetry-forge
 
-Updated: 2026-06-26
+Updated: 2026-11-22
 
 > 🧊 **FROZEN for feature work since 2026-10-03 — study block open.** This repo was cut into
 > **12 territories** by the APROFUNDAMENTOS programme (`repo-base-career/sistema/APROFUNDAMENTOS_ROADMAP.md`
@@ -10,6 +10,35 @@ Updated: 2026-06-26
 > closes. It is a *convention*, not a mechanism — nothing enforces it; Jorge can lift it by saying so.
 
 ## Current focus
+
+**2026-11-22 — the three 🔴 URGENT public-claim fixes from the study backlog, v0.3.0.**
+R4-T7-a (lossless `anomaly_cells` table), R4-T9-a (stale frames decode back), R4-T10-a
+(golden compares against pinned stats). Data changed (stale values) and a table was
+added, so **0.2.0 → 0.3.0**. **Downstream:** `forge-pdm-mlops`'s worker image pins this
+repo by commit SHA (`Dockerfile.worker` `FORGE_REF`), so the deployed demo is unaffected.
+But local dev in the shared `VS_Code/.venv` imports this checkout (editable install) and
+already runs 0.3.0, and its `[generate]` extra still says `==0.2.0` — that pin must move
+(and its fixture be checked) the next time that repo is touched. A blind adversarial
+pass on the fixes found two more defects, fixed in the same commit: `forge validate`
+from the repo root could not import `validation/` as an installed script (exit 3), and
+an empty `anomaly_cells` reached DuckDB with INTEGER text columns. **149 tests green**
+(+14). The rest of the study backlog below is still open and goes to the automated fix
+runner.
+
+New backlog from the same pass (not fixed):
+- `pd.read_csv` with the default float parser reads some values one ulp off (e.g.
+  `242.95000000000002` → `242.95`), so a CSV round-trip breaks exact decode equality
+  for ~2 % of `can_frames` rows; the file text is exact (`float_precision="round_trip"`
+  or DuckDB read it back exactly). Document it, or write CSV with `%.17g`.
+- `anomaly_cells` lists every *injected* cell, including ~2 % whose value did not
+  change (stuck at the same value, a drift ramp's first step, clamped drift, a stale
+  frame that quantizes to the original). Correct for "every injected defect"; worth one
+  sentence in the dictionary.
+- The golden pins were generated on Python 3.14 + numpy 2.5.4; whether the CI matrix
+  (3.11/3.12, whatever numpy pip resolves) reproduces them to 1e-4 of the span is
+  proven only by the first CI run.
+
+**Previous focus:**
 
 **Post-F6 realism fix — progressive pre-failure degradation (ADR-020), v0.2.0.**
 Consuming the generator from `forge-pdm-mlops` surfaced a real defect: the failure
@@ -396,7 +425,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   ADR-020; the `span <= 0` guard in `apply_degradation` is unreachable for labels built by `derive_unit_labels` (reachable only with hand-built `UnitLabels`); the tests' `small_config`s (24–48 h)
   are shorter than the 168 h horizon, so every test window starts at row 0 and the ramp is compressed (not measured on the
   90-day default).
-- **R4-T7-a — 🔴 URGENT — "every injected defect is recoverable" is false in the emitted dataset.**
+- **R4-T7-a — 🔴 URGENT — ✅ Fixed 2026-11-22 (v0.3.0): new always-written `anomaly_cells` table, one row per injected cell; manifest adds `n_anomaly_cells_by_type`; ADR-006 addendum.** Original finding: "every injected defect is recoverable" was false in the emitted dataset.
   README L155, ADR-006 and the `anomalies/inject.py` docstring promise full recoverability; the
   dataset carries one `anomaly_type`/`anomaly_signal` per row and the per-cell `hits` are dropped
   inside `simulate()` (only CAN-frame hits survive, and only with `--emit-raw-frames`). Probe
@@ -459,8 +488,8 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   against the signal registry (a typo skips the signal silently); stuck freezes at `values[start-1]`,
   which can be another defect's cell; the joint rule's driver cell isn't reserved, so a later
   stuck/drift can undo a labeled contradiction; the joint constants' "refined in F5" comment is stale.
-- 🔴 **URGENT (public README claim) — R4-T9-a — `can_frame_stale` writes a value its own frame
-  doesn't decode to.** `_inject_stale` writes the pre-encoding float (`values[i] = held_value`) but
+- 🔴 **URGENT (public README claim) — R4-T9-a — ✅ Fixed 2026-11-22 (v0.3.0): the stale cell now holds `decode(held_frame)`; a test decodes every `can_frames` row; ADR-019 addendum.** Original finding: `can_frame_stale` wrote a value its own frame
+  doesn't decode to. `_inject_stale` writes the pre-encoding float (`values[i] = held_value`) but
   records the quantized `held_frame`. Measured (`{"days": 10, "resolution": "5min", "seed": 7}`,
   2,866 frames, each decoded back and compared to `readings`): 803 of 932 stale cells (86.2 %)
   differ from `decode(frame_hex)`, by at most 1.88 (within half a quantum); the other three families
@@ -547,8 +576,8 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   anomalies off and ~44 s at default rates; `_fault_segments` is 47.6 of 51.9 profiled seconds
   (per-step Python loop).
 
-- 🔴 **URGENT (public README claim) — R4-T10-a — the `golden` adapter compares nothing; it is not a
-  drift guard.** Its only check is that each signal's mean on the regenerated fixed profile lies inside
+- 🔴 **URGENT (public README claim) — R4-T10-a — ✅ Fixed 2026-11-22 (v0.3.0): mean/std/p05/p95 pinned in `validation/golden_pins.py`, tolerance 1e-4 of the J1939 span; +40 °C on coolant now fails; ADR-017 addendum.** Original finding: the `golden` adapter compared nothing; it was not a
+  drift guard. Its only check is that each signal's mean on the regenerated fixed profile lies inside
   its J1939 range (`validation/reference.py` L256); the std is computed and never checked, and there is
   no expected value or tolerance. Every generator output is already clipped to that range, so the mean
   is in range by construction. Measured: adding +40 °C to the coolant formula moves the golden coolant

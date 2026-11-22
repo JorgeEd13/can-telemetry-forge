@@ -15,12 +15,14 @@ contract**:
    principle carry defects on two different signals at one timestamp. We resolve to
    one label per row by **injector priority = registry order** (obvious outlier
    first … dropout last) and record which **signal** won in ``anomaly_signal``.
-   The per-cell ground truth is never lost — it is exactly recoverable by
-   re-checking each signal against its range / the labels — but the row-level
-   categorical gives downstream ML a clean multiclass target/feature.
+   The row-level categorical gives downstream ML a clean multiclass
+   target/feature, but it is **lossy**: a row with defects on two signals names
+   only one, and many defect cells hold in-range values a range check cannot find.
 
-3. **Recoverability (ADR-006).** Every injected cell is reflected in the returned
-   labels; nothing is injected without a label.
+3. **Recoverability (ADR-006).** The per-cell ground truth is kept in
+   :meth:`AnomalyLabels.cell_records` — one record per injected (signal, timestamp)
+   cell — which the simulator emits as the ``anomaly_cells`` table. Every injected
+   cell appears there; nothing is injected without a label (R4-T7-a).
 
 Determinism (ADR-005): one child rng per injector (spawned by the caller's unit
 stream) → same config + seed yields byte-identical defects.
@@ -55,6 +57,19 @@ class AnomalyLabels:
     anomaly_signal: np.ndarray
     is_outlier: np.ndarray
     hits: list[InjectionHit]
+
+    def cell_records(self) -> list[tuple[int, str, str]]:
+        """Per-cell ground truth: ``(t_index, signal, anomaly_type)`` per injected cell.
+
+        Unlike the row labels this is lossless — at most one defect lands per
+        (signal, timestamp) cell (eligibility shrinks as injectors claim cells), so
+        each cell has exactly one record, in injector (priority) order.
+        """
+        records: list[tuple[int, str, str]] = []
+        for hit in self.hits:
+            for t_index in np.flatnonzero(hit.mask):
+                records.append((int(t_index), hit.signal, hit.anomaly_type))
+        return records
 
     def frame_records(self) -> list[tuple[int, str, str, str]]:
         """Per-cell corrupted-frame records for the raw-frame side artifact (F6).

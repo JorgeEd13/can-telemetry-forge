@@ -32,7 +32,10 @@ FORMATS: tuple[str, ...] = ("parquet", "csv", "duckdb")
 
 # Output table name → attribute on SimulatedDataset. ``can_frames`` (F6) is appended
 # only when ``config.emit_raw_frames`` is set (the raw frames are an opt-in artifact).
-_TABLES = ("readings", "units", "vehicle_classes", "equipment_models", "regions", "contracts")
+_TABLES = (
+    "readings", "anomaly_cells", "units", "vehicle_classes", "equipment_models",
+    "regions", "contracts",
+)
 
 
 def _tables(ds: SimulatedDataset) -> dict[str, pd.DataFrame]:
@@ -76,6 +79,12 @@ def _anomaly_type_counts(ds: SimulatedDataset) -> dict[str, int]:
     return {atype: int(counts.get(atype, 0)) for atype in ANOMALY_TYPES}
 
 
+def _anomaly_cell_counts(ds: SimulatedDataset) -> dict[str, int]:
+    """Injected cell count per defect type — the true per-type totals (R4-T7-a)."""
+    counts = ds.anomaly_cells["anomaly_type"].value_counts()
+    return {atype: int(counts.get(atype, 0)) for atype in ANOMALY_TYPES}
+
+
 def _manifest(ds: SimulatedDataset, fmt: str) -> dict:
     cfg = ds.config
     return {
@@ -103,7 +112,11 @@ def _manifest(ds: SimulatedDataset, fmt: str) -> dict:
         "n_readings": int(ds.readings.shape[0]),
         "n_failure_rows": int(ds.readings["failure_within_h"].sum()) if not ds.readings.empty else 0,
         "n_outlier_rows": int(ds.readings["is_outlier"].sum()) if not ds.readings.empty else 0,
+        # Rows whose single row label is this type (the winner when a row has defects
+        # on two signals) vs. every injected cell of the type (from `anomaly_cells`).
         "n_anomaly_rows_by_type": _anomaly_type_counts(ds),
+        "n_anomaly_cells": int(ds.anomaly_cells.shape[0]),
+        "n_anomaly_cells_by_type": _anomaly_cell_counts(ds),
         # F6: the raw-frame side artifact and how many byte-level frames it carries.
         "emit_raw_frames": cfg.emit_raw_frames,
         "n_can_frames": int(ds.can_frames.shape[0]),
@@ -137,14 +150,17 @@ def _dataset_dictionary_md(ds: SimulatedDataset) -> str:
         "defect (obvious/joint outlier or stuck/drift sensor fault). Back-compat rollup. |",
         "| `anomaly_type` | — | — | Labeled defect on the row (else empty): "
         + " / ".join(f"`{t}`" for t in ANOMALY_TYPES)
-        + ". One per row by injector priority. |",
+        + ". One per row by injector priority — a row with defects on two signals "
+        "names only one; the full list is in `anomaly_cells`. |",
         "| `anomaly_signal` | — | — | Which signal carries the row's labeled defect "
         "(empty if none). |",
         "",
         "### Labeled defects (`anomaly_type`)",
         "",
-        "Every injected defect is recoverable from these labels (ADR-006/-016). "
-        "Era-`NULL` cells are never targeted — a sensor fault is a *healthy* channel "
+        "Every injected defect is recoverable from the `anomaly_cells` table — one row "
+        "per injected (`unit_id`, `t_index`, `signal`) cell with its `anomaly_type` "
+        "(ADR-006). The `readings` columns keep **one label per row**, so they are a "
+        "summary, not the ground truth. Era-`NULL` cells are never targeted — a sensor fault is a *healthy* channel "
         "going bad, distinct from structural era-missingness.",
         "",
         "- `obvious_outlier` — a single out-of-range spike (impossible on its own).",
@@ -167,6 +183,16 @@ def _dataset_dictionary_md(ds: SimulatedDataset) -> str:
         "see them (ADR-019). With `emit_raw_frames` on, the byte-level corrupted frames "
         "are written to the `can_frames` table (else absent — the decoded readings are "
         "the product).",
+        "",
+        "## `anomaly_cells` (per-cell defect labels)",
+        "",
+        "| Column | Unit | J1939 SPN | Meaning |",
+        "|---|---|---|---|",
+        "| `unit_id` | — | — | Unit identifier (FK → `units`). |",
+        "| `t_index` | — | — | Reading index (joins `readings` on `unit_id`, `t_index`). |",
+        "| `timestamp_h` | h | — | Hours since window start. |",
+        "| `signal` | — | — | The signal column the defect was injected into. |",
+        "| `anomaly_type` | — | — | The injected defect (one per cell). |",
         "",
         "## Dimension tables",
         "",

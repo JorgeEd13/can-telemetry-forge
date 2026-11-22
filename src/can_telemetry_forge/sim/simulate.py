@@ -65,6 +65,8 @@ class SimulatedDataset:
         readings: tidy long table — one row per (unit, timestamp) with every
             signal column (era-gated signals are NaN/NULL) plus its labels.
         units / vehicle_classes / regions / contracts: dimension tables.
+        can_frames: the byte-level corrupted frames (opt-in side table, F6).
+        anomaly_cells: one row per injected defect cell — the lossless labels.
         config: the config that produced it (for provenance in the writers).
     """
 
@@ -77,6 +79,9 @@ class SimulatedDataset:
     # The byte-level corrupted CAN frames (F6, ADR-019). Always built; empty unless a
     # frame fault fired. Written as a side table only when ``config.emit_raw_frames``.
     can_frames: pd.DataFrame
+    # Lossless per-cell defect ground truth (ADR-006, R4-T7-a): one row per injected
+    # (unit, timestamp, signal) cell. ``readings.anomaly_type`` keeps one per row.
+    anomaly_cells: pd.DataFrame
     config: ForgeConfig
 
 
@@ -183,6 +188,11 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
     # (unit_id, t_index, timestamp_h, signal, anomaly_type, frame_hex) for the F6
     # raw-frame side artifact; populated only by CAN-frame faults (ADR-019).
     frame_rows: list[dict] = []
+    # (unit_id, t_index, signal, anomaly_type) per injected cell — the lossless labels.
+    cell_unit: list[str] = []
+    cell_t: list[int] = []
+    cell_signal: list[str] = []
+    cell_type: list[str] = []
 
     for i, unit in enumerate(units):
         region = region_by_id[unit.region_id]
@@ -230,6 +240,12 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         frame["anomaly_signal"] = anomalies.anomaly_signal
         frames.append(pd.DataFrame(frame))
 
+        for t_index, signal, atype in anomalies.cell_records():
+            cell_unit.append(unit.unit_id)
+            cell_t.append(t_index)
+            cell_signal.append(signal)
+            cell_type.append(atype)
+
         # Collect the byte-level corrupted frames (F6). Built regardless of the
         # ``emit_raw_frames`` flag (cheap when no frame fault fired); the writer
         # decides whether to persist it.
@@ -262,6 +278,18 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         columns=["unit_id", "t_index", "timestamp_h", "signal", "anomaly_type", "frame_hex"],
     )
 
+    anomaly_cells = pd.DataFrame(
+        {
+            # "string" (not object): an EMPTY object column reaches DuckDB as INTEGER,
+            # so a zero-defect run would change the table's schema.
+            "unit_id": pd.Series(cell_unit, dtype="string"),
+            "t_index": np.asarray(cell_t, dtype=np.int32),
+            "timestamp_h": np.asarray(cell_t, dtype=float) * step_h,
+            "signal": pd.Series(cell_signal, dtype="string"),
+            "anomaly_type": pd.Series(cell_type, dtype="string"),
+        }
+    )
+
     dims = _dimension_tables(config, units)
     return SimulatedDataset(
         readings=readings,
@@ -271,6 +299,7 @@ def simulate(config: ForgeConfig) -> SimulatedDataset:
         regions=dims["regions"],
         contracts=dims["contracts"],
         can_frames=can_frames,
+        anomaly_cells=anomaly_cells,
         config=config,
     )
 

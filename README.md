@@ -7,7 +7,7 @@
 <p align="center"><em>Synthetic heavy-equipment telemetry, grounded in the J1939 standard — realistic predictive-maintenance data you can regenerate from a seed.</em></p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-F0%E2%80%93F6%20complete%20%C2%B7%20v0.2.0-success" alt="Status: F0–F6 complete · v0.2.0">
+  <img src="https://img.shields.io/badge/status-F0%E2%80%93F6%20complete%20%C2%B7%20v0.3.0-success" alt="Status: F0–F6 complete · v0.3.0">
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/data-100%25%20synthetic-blueviolet" alt="100% synthetic data">
   <img src="https://img.shields.io/badge/grounded-SAE%20J1939%20%2B%20physics-teal" alt="Grounded in SAE J1939 + physics">
@@ -151,8 +151,10 @@ forge generate --emit-raw-frames --out out/
 ```
 
 This writes the tidy `readings` table — signals plus the labels
-`failure_within_h` / `failure_mode` and `anomaly_type` / `anomaly_signal` (with an
-`is_outlier` rollup) so every injected defect is recoverable — plus `units` /
+`failure_within_h` / `failure_mode` and a one-per-row `anomaly_type` /
+`anomaly_signal` summary (with an `is_outlier` rollup) — plus an `anomaly_cells`
+table with one row per injected (unit, timestamp, signal) cell, so every injected
+defect is recoverable even when a row carries two — plus `units` /
 `vehicle_classes` / `equipment_models` / `regions` / `contracts` dimension tables, a
 `manifest.json` (provenance + run parameters + per-type defect counts + the run's
 season), and a generated `dataset_dictionary.md`. With `--emit-raw-frames` it also
@@ -171,8 +173,10 @@ a self-contained Markdown report. It runs two **offline** reference adapters by
 default — so it needs no network and is reproducible by anyone:
 
 - **`in_spec`** — every value sits inside its documented SAE J1939 range.
-- **`golden`** — per-signal summary stats match a pinned, *recomputed* reference run
-  (catches silent drift in the generator itself — nothing is committed).
+- **`golden`** — a fixed-seed run's per-signal mean / std / p05 / p95 must match
+  pinned values committed in `validation/golden_pins.py`, within 1e-4 of each
+  signal's J1939 span (catches silent drift in the generator itself; an intentional
+  change re-pins in the same commit).
 
 ```bash
 # Offline plausibility report to stdout (or --report report.md):

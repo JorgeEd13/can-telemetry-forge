@@ -135,9 +135,14 @@ def _inject_stale(
         for start, end in segments:
             # The last good frame before the fault is re-sent for the whole segment.
             held_value = float(values[start - 1]) if start > 0 else float(values[start])
-            held_frame = frame_to_hex(encode_signal_frame(held_value, spec))
+            held_bytes = encode_signal_frame(held_value, spec)
+            held_frame = frame_to_hex(held_bytes)
+            # The table carries what a receiver decodes from the re-sent frame — the
+            # quantized value, not the pre-encoding float (R4-T9-a): a stale cell must
+            # decode from its own recorded frame exactly like the other frame faults.
+            received = decode_signal_frame(held_bytes, spec)
             for i in range(start, end):
-                values[i] = held_value
+                values[i] = received
                 frames[i] = held_frame
                 mask[i] = True
         hits.append(InjectionHit(name, mask, CAN_FRAME_STALE, frames=frames))

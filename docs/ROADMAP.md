@@ -124,8 +124,9 @@ README and an ADR; CI does not require the external data (validation is opt-in).
 `reference.py` (the `ReferenceAdapter` registry + `run_validation` orchestrator),
 `compare.py` (pure summary-stat + **histogram-intersection** overlap, NumPy-only),
 `report.py` (self-contained Markdown report). Three adapters: **`in_spec`** (offline
-— values inside documented J1939 ranges), **`golden`** (offline — mean/std match a
-*recomputed* pinned reference run, catching generator drift; nothing committed), and
+— values inside documented J1939 ranges), **`golden`** (offline — a fixed-seed run's
+mean/std/p05/p95 match pinned literals in `validation/golden_pins.py`, catching
+generator drift; corrected 2026-11-22, see ADR-017 addendum), and
 **`ved`** (opt-in — overlap vs the **Vehicle Energy Dataset**, Kaggle **CC-BY 4.0**,
 fetched at run time via the Kaggle API, **never committed**, degrades gracefully when
 offline). Offline adapters always run so `forge validate` is reproducible-by-anyone

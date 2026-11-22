@@ -11,9 +11,9 @@ and anomaly registries, ADR-012/-016):
 
 * ``in_spec`` — every signal's values must sit inside its documented J1939 range
   (``SignalSpec.min_value``..``max_value``). Pure, offline, no external data.
-* ``golden`` — the run's per-signal summary stats must match a pinned reference
-  run regenerated from a fixed seed. Pure, offline; catches silent drift in the
-  generator itself.
+* ``golden`` — a fixed-seed run's per-signal mean/std/p05/p95 must match pinned
+  literal values (``golden_pins.py``) within 1e-4 of the J1939 span. Pure, offline;
+  catches silent drift in the generator itself.
 * ``ved`` — histogram/summary overlap against the **Vehicle Energy Dataset**
   (Kaggle, CC-BY 4.0), **fetched at run time, never committed** (ADR-017). The one
   adapter that touches the network, and only when explicitly requested.

@@ -166,6 +166,26 @@ def _run_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _put_checkout_on_path() -> None:
+    """Let an installed ``forge`` find ``./validation`` when run from the repo root.
+
+    An installed console script's ``sys.path`` holds its own bin directory, not the
+    working directory, and the package install covers ``src/`` only — so ``forge
+    validate`` from the repo root could never import ``validation`` (found by a blind
+    adversarial pass, 2026-11-22). Only the current directory is added, and only when
+    it actually holds the ``validation`` package.
+    """
+    import os
+    from pathlib import Path
+
+    cwd = Path.cwd()
+    if not (cwd / "validation" / "__init__.py").is_file():
+        return
+    resolved = {Path(p or os.curdir).resolve() for p in sys.path}
+    if cwd.resolve() not in resolved:
+        sys.path.insert(0, str(cwd))
+
+
 def _run_validate(args: argparse.Namespace) -> int:
     """Execute ``forge validate``. Returns an exit code (non-zero on check failure).
 
@@ -177,6 +197,7 @@ def _run_validate(args: argparse.Namespace) -> int:
     """
     from dataclasses import replace
 
+    _put_checkout_on_path()
     try:
         from validation import render_report, run_validation
     except ImportError as exc:

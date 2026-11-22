@@ -264,3 +264,58 @@ def test_cli_validate_to_stdout(tmp_path, capsys) -> None:
     assert rc == 0
     out = capsys.readouterr().out
     assert "Distribution validation report" in out
+
+
+# --- golden is a real drift guard (R4-T10-a) ----------------------------------
+
+
+def test_golden_fails_on_a_shifted_generator(monkeypatch) -> None:
+    # The mutation that used to pass: +40 degC on coolant. The mean stays inside the
+    # J1939 range, so only a comparison against pinned values can catch it.
+    from validation import reference
+
+    real_simulate = reference.simulate
+
+    def shifted(config):
+        ds = real_simulate(config)
+        ds.readings["coolant_temp_c"] = ds.readings["coolant_temp_c"] + 40.0
+        return ds
+
+    reference._golden_drift_result.cache_clear()
+    monkeypatch.setattr(reference, "simulate", shifted)
+    try:
+        checks, _ = reference._golden_drift_result()
+    finally:
+        reference._golden_drift_result.cache_clear()
+    failed = {c.name for c in checks if not c.passed}
+    assert "coolant_temp_c golden mean" in failed
+    assert not any(n.startswith("engine_speed_rpm") for n in failed)
+
+
+@pytest.mark.parametrize("stat", ["mean", "std", "p05", "p95"])
+def test_compare_to_pins_catches_each_stat_and_missing_signals(stat) -> None:
+    from validation.golden_pins import GOLDEN_PINS
+    from validation.reference import compare_to_pins
+
+    assert all(c.passed for c in compare_to_pins(GOLDEN_PINS, GOLDEN_PINS))
+    moved = {k: dict(v) for k, v in GOLDEN_PINS.items()}
+    moved["oil_pressure_kpa"][stat] += 1.0  # 1 kPa = 10x the tolerance on a 1000 kPa span
+    assert [c.name for c in compare_to_pins(moved, GOLDEN_PINS) if not c.passed] == [
+        f"oil_pressure_kpa golden {stat}"
+    ]
+    dropped = {k: v for k, v in GOLDEN_PINS.items() if k != "def_level_pct"}
+    assert not all(c.passed for c in compare_to_pins(dropped, GOLDEN_PINS))
+
+
+def test_golden_tolerance_boundary_is_1e4_of_the_span() -> None:
+    from validation.golden_pins import GOLDEN_PINS
+    from validation.reference import compare_to_pins
+
+    tol = 1e-4 * 250.0  # coolant span: -40..210 degC
+    for shift, ok in ((0.9 * tol, True), (1.1 * tol, False)):
+        moved = {k: dict(v) for k, v in GOLDEN_PINS.items()}
+        moved["coolant_temp_c"]["mean"] += shift
+        mean_check = next(
+            c for c in compare_to_pins(moved, GOLDEN_PINS) if c.name == "coolant_temp_c golden mean"
+        )
+        assert mean_check.passed is ok, shift

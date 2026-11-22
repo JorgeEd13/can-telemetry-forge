@@ -31,7 +31,7 @@ from can_telemetry_forge.anomalies.spec import (
     SENSOR_STUCK,
 )
 from can_telemetry_forge.config import SEASONS, config_from_dict
-from can_telemetry_forge.signals import Era, generate_unit, get_spec
+from can_telemetry_forge.signals import Era, generate_unit, get_spec, signal_names
 from can_telemetry_forge.sim import build_fleet, simulate
 from can_telemetry_forge.sim.drivers import drivers_for_unit
 
@@ -254,3 +254,54 @@ def test_anomaly_rates_config_is_validated() -> None:
 def test_obvious_outlier_rate_back_compat_alias() -> None:
     cfg = config_from_dict({"obvious_outlier_rate": 0.03})
     assert cfg.resolved_anomaly_rates()["obvious_outlier"] == 0.03
+
+
+# --- lossless per-cell labels (ADR-006, R4-T7-a) ------------------------------
+
+
+def _cells_set(df) -> set[tuple[str, int, str]]:
+    return set(zip(df["unit_id"], df["t_index"].astype(int), df["signal"], strict=True))
+
+
+def test_anomaly_cells_cover_every_changed_cell() -> None:
+    # Same seed with injection off vs on: the anomaly streams are separate, so every
+    # cell whose value (or NULL-ness) differs was touched by an injector and must be
+    # named in anomaly_cells — including cells on a row whose row label names
+    # another signal, and in-range defects a range check could never find.
+    base = {"days": 10, "resolution": "5min", "seed": 7}
+    rates_off = dict.fromkeys(DEFAULT_ANOMALY_RATES, 0.0)
+    clean = simulate(config_from_dict({**base, "anomaly_rates": rates_off}))
+    dirty = simulate(config_from_dict(base))
+    assert clean.anomaly_cells.empty
+    labeled = _cells_set(dirty.anomaly_cells)
+    changed: set[tuple[str, int, str]] = set()
+    for name in signal_names():
+        a = clean.readings[name].to_numpy(dtype=float)
+        b = dirty.readings[name].to_numpy(dtype=float)
+        diff = ~((a == b) | (np.isnan(a) & np.isnan(b)))
+        for i in np.flatnonzero(diff):
+            changed.add((dirty.readings["unit_id"].iat[i], int(dirty.readings["t_index"].iat[i]), name))
+    assert changed, "the probe must actually inject something"
+    assert changed <= labeled, sorted(changed - labeled)[:5]
+    # Rows with defects on two signals exist, so the row label alone is lossy.
+    per_row = dirty.anomaly_cells.groupby(["unit_id", "t_index"]).size()
+    assert (per_row >= 2).any()
+
+
+def test_anomaly_cells_one_record_per_cell_and_match_row_labels() -> None:
+    ds = simulate(config_from_dict({"days": 10, "resolution": "5min", "seed": 7}))
+    cells = ds.anomaly_cells
+    assert not cells.duplicated(["unit_id", "t_index", "signal"]).any()
+    # Every labeled row's (signal, type) is one of that row's cells.
+    rows = ds.readings[ds.readings["anomaly_type"] != ""]
+    merged = rows.merge(
+        cells,
+        left_on=["unit_id", "t_index", "anomaly_signal", "anomaly_type"],
+        right_on=["unit_id", "t_index", "signal", "anomaly_type"],
+        how="left",
+        indicator=True,
+    )
+    assert (merged["_merge"] == "both").all()
+    # And every cell sits on a labeled row.
+    labeled_rows = set(zip(rows["unit_id"], rows["t_index"].astype(int), strict=True))
+    assert set(zip(cells["unit_id"], cells["t_index"].astype(int), strict=True)) <= labeled_rows

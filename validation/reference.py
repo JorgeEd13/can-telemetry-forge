@@ -10,10 +10,12 @@ Adapters
 --------
 * ``in_spec`` (offline) — assert every signal sits inside its documented J1939
   range from the signal registry. Catches a generator emitting out-of-spec values.
-* ``golden`` (offline) — assert per-signal summary stats match a pinned reference
-  run (same fixed seed/profile), within tolerance. Catches silent drift in the
-  generator. The golden run is *recomputed*, never stored as data — reproducibility
-  by construction (ADR-005), so nothing is committed.
+* ``golden`` (offline) — regenerate a fixed seed/profile and assert each signal's
+  mean / std / p05 / p95 match **pinned literal values** (``golden_pins.py``) within
+  a tolerance of 1e-4 of the signal's J1939 span. Catches silent drift in the
+  generator. Only the ~44 summary numbers are committed, never generated data; an
+  intentional generator change re-pins them (``python -m validation.reference
+  --pin-golden``) in the same commit, so the drift shows up in review.
 * ``ved`` (network, opt-in) — histogram overlap against the **Vehicle Energy
   Dataset** (Kaggle, CC-BY 4.0), fetched at run time and **never committed**
   (ADR-017). Maps VED's OBD-II columns onto our overlapping J1939 signals.
@@ -195,77 +197,108 @@ def _check_in_spec(readings: pd.DataFrame, units: dict[str, str]) -> ReferenceRe
 # --- adapter: golden (offline) -----------------------------------------------
 
 
-def _golden_signal_stats() -> dict[str, tuple[float, float]]:
-    """Regenerate the pinned golden profile and return its per-signal (mean, std).
+GOLDEN_STATS: tuple[str, ...] = ("mean", "std", "p05", "p95")
 
-    Recomputed rather than stored: the generator is deterministic in the seed
-    (ADR-005), so the reference *is* the act of regenerating the fixed profile —
-    nothing is committed.
-    """
+# Allowed |recomputed - pinned| per stat, as a fraction of the signal's J1939 span.
+# Far above cross-platform float noise (~1e-13), far below any real change: on
+# coolant (span 250 degC) it is 0.025 degC.
+GOLDEN_REL_TOL: float = 1e-4
+
+
+def _golden_signal_stats() -> dict[str, dict[str, float]]:
+    """Regenerate the fixed golden profile; return per-signal mean/std/p05/p95."""
     from can_telemetry_forge.config import config_from_dict
 
     ds = simulate(config_from_dict(GOLDEN_PROFILE))
-    stats: dict[str, tuple[float, float]] = {}
+    stats: dict[str, dict[str, float]] = {}
     for name in signal_names():
         if name not in ds.readings.columns:
             continue
         arr = ds.readings[name].to_numpy(dtype=float)
         finite = arr[np.isfinite(arr)]
         if finite.size:
-            stats[name] = (float(finite.mean()), float(finite.std()))
+            stats[name] = {
+                "mean": float(finite.mean()),
+                "std": float(finite.std()),
+                "p05": float(np.percentile(finite, 5)),
+                "p95": float(np.percentile(finite, 95)),
+            }
     return stats
 
 
-# Fleet-draw fields whose aggregate legitimately changes with the seed (they reflect
-# *which units exist*, not the signal generator) — excluded from the golden in-spec
-# range check's per-signal stat sanity, which targets the CAN signal model.
-_FLEET_DERIVED = frozenset({"runtime_hours", "equipment_age_days"})
+def compare_to_pins(
+    stats: dict[str, dict[str, float]], pins: dict[str, dict[str, float]]
+) -> list[CheckResult]:
+    """One check per (signal, stat): recomputed vs pinned, within the span tolerance.
+
+    A signal present on one side only fails too — a signal that appears or vanishes
+    is drift as much as a moved mean.
+    """
+    checks: list[CheckResult] = []
+    for name in sorted(set(stats) | set(pins)):
+        if name not in stats or name not in pins:
+            checks.append(
+                CheckResult(
+                    name=f"{name} golden present",
+                    passed=False,
+                    detail="in recomputed run" if name in stats else "pinned but not produced",
+                )
+            )
+            continue
+        spec = get_spec(name)
+        tol = GOLDEN_REL_TOL * (spec.max_value - spec.min_value)
+        for stat in GOLDEN_STATS:
+            got, want = stats[name][stat], pins[name][stat]
+            checks.append(
+                CheckResult(
+                    name=f"{name} golden {stat}",
+                    passed=bool(abs(got - want) <= tol),
+                    detail=f"{got:.6g} vs pinned {want:.6g} (tol {tol:.3g} {spec.unit})",
+                )
+            )
+    return checks
 
 
 @lru_cache(maxsize=1)
 def _golden_drift_result() -> tuple[list[CheckResult], list[SignalComparison]]:
-    """The golden adapter's checks + summaries, cached per process.
+    """The golden adapter's checks + summaries, cached per process."""
+    from .golden_pins import GOLDEN_PINS
 
-    The drift guard, expressed **without committed data**: regenerate the pinned
-    golden profile and assert every CAN signal's mean sits inside its documented
-    J1939 range. A generator change that pushed a signal's central tendency out of
-    spec — the kind of silent drift this adapter exists to catch — fails here. The
-    fields driven by *fleet composition* (runtime hours, equipment age) are reported
-    but not asserted, since their aggregate legitimately moves with the seed (that is
-    fleet randomness, not signal drift). True byte-level reproducibility for a fixed
-    seed is covered by the simulator's own determinism tests.
-    """
-    base = _golden_signal_stats()
-    checks: list[CheckResult] = []
-    comparisons: list[SignalComparison] = []
-    for name in signal_names():
-        if name not in base:
-            continue
-        spec = get_spec(name)
-        mean, std = base[name]
-        comparisons.append(
-            SignalComparison(
-                signal=name, unit=spec.unit, n=0,
-                gen_min=float("nan"), gen_max=float("nan"), gen_mean=mean,
-                gen_std=std, gen_p05=float("nan"), gen_p50=float("nan"),
-                gen_p95=float("nan"),
-            )
+    stats = _golden_signal_stats()
+    comparisons = [
+        SignalComparison(
+            signal=name, unit=get_spec(name).unit, n=0,
+            gen_min=float("nan"), gen_max=float("nan"), gen_mean=st["mean"],
+            gen_std=st["std"], gen_p05=st["p05"], gen_p50=float("nan"),
+            gen_p95=st["p95"],
         )
-        if name in _FLEET_DERIVED:
-            continue
-        in_range = spec.min_value <= mean <= spec.max_value
-        checks.append(
-            CheckResult(
-                name=f"{name} golden mean in J1939 range",
-                passed=bool(in_range),
-                detail=f"mean {mean:.4g} in [{spec.min_value:g}, {spec.max_value:g}] {spec.unit}",
-            )
-        )
-    return checks, comparisons
+        for name, st in stats.items()
+    ]
+    return compare_to_pins(stats, GOLDEN_PINS), comparisons
+
+
+def pin_golden_source() -> str:
+    """Render ``golden_pins.py`` from the current generator (for an intentional re-pin)."""
+    lines = [
+        '"""Pinned golden summary stats (generated — do not hand-edit).',
+        "",
+        "Regenerate with ``python -m validation.reference --pin-golden`` ONLY when a",
+        "generator change is intentional, and commit it with that change.",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "GOLDEN_PINS: dict[str, dict[str, float]] = {",
+    ]
+    for name, st in _golden_signal_stats().items():
+        inner = ", ".join(f'"{k}": {st[k]!r}' for k in GOLDEN_STATS)
+        lines.append(f'    "{name}": {{{inner}}},')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
 
 
 def _check_golden(readings: pd.DataFrame, units: dict[str, str]) -> ReferenceResult:
-    """Drift guard: the recomputed golden run is in-spec and distributionally stable.
+    """Drift guard: the fixed-seed golden run still matches its pinned summary stats.
 
     Config-independent — it always validates the pinned *golden profile* (not the
     user's run), so it answers "is generation still healthy?" regardless of what is
@@ -276,7 +309,7 @@ def _check_golden(readings: pd.DataFrame, units: dict[str, str]) -> ReferenceRes
     checks, comparisons = _golden_drift_result()
     return ReferenceResult(
         adapter="golden",
-        description="Recomputed golden reference run is in-spec and seed-stable (drift guard).",
+        description="Fixed-seed golden run matches pinned mean/std/p05/p95 (drift guard).",
         available=True,
         comparisons=comparisons,
         checks=checks,
@@ -462,7 +495,7 @@ REFERENCE_ADAPTERS: dict[str, ReferenceAdapter] = {
     a.name: a
     for a in (
         ReferenceAdapter("in_spec", "documented J1939 ranges", network=False, check=_check_in_spec),
-        ReferenceAdapter("golden", "pinned recomputed reference run", network=False, check=_check_golden),
+        ReferenceAdapter("golden", "fixed-seed run vs pinned summary stats", network=False, check=_check_golden),
         ReferenceAdapter("ved", "Vehicle Energy Dataset (CC-BY 4.0)", network=True, check=_check_ved),
     )
 }
@@ -544,6 +577,18 @@ __all__ = [
     "ReferenceAdapter",
     "ReferenceResult",
     "ValidationRun",
+    "compare_to_pins",
     "get_adapter",
+    "pin_golden_source",
     "run_validation",
 ]
+
+
+if __name__ == "__main__":  # pragma: no cover - maintainer tool
+    if sys.argv[1:] == ["--pin-golden"]:
+        target = Path(__file__).resolve().parent / "golden_pins.py"
+        target.write_text(pin_golden_source(), encoding="utf-8")
+        print(f"wrote {target}")
+    else:
+        print("usage: python -m validation.reference --pin-golden", file=sys.stderr)
+        sys.exit(2)

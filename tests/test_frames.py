@@ -283,3 +283,20 @@ def test_generators_do_not_depend_on_frame_layout() -> None:
             assert a is None and b is None
             continue
         np.testing.assert_array_equal(np.nan_to_num(a), np.nan_to_num(b))
+
+
+def test_every_can_frame_decodes_to_the_table_value() -> None:
+    # R4-T9-a: the table holds what a receiver decodes from the recorded frame — for
+    # every frame family, stale included (it used to carry the pre-encoding float).
+    ds = simulate(config_from_dict({"days": 10, "resolution": "5min", "seed": 7}))
+    cf = ds.can_frames
+    assert not cf.empty
+    assert (cf["anomaly_type"] == "can_frame_stale").any()
+    table = ds.readings.set_index(["unit_id", "t_index"])
+    for row in cf.itertuples(index=False):
+        decoded = decode_signal_frame(bytes.fromhex(row.frame_hex), get_spec(row.signal))
+        value = table.at[(row.unit_id, row.t_index), row.signal]
+        if math.isnan(decoded):
+            assert math.isnan(value), row
+        else:
+            assert value == decoded, row
