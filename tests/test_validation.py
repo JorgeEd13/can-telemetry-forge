@@ -194,11 +194,10 @@ def test_ved_overlap_with_a_fake_local_csv(tmp_path, monkeypatch) -> None:
     assert any(c.overlap is not None for c in result.comparisons)
 
 
-def test_run_validation_unknown_dataset_is_skipped(capsys) -> None:
-    run = run_validation_direct(small_config(), datasets=("nope",))
-    out = capsys.readouterr()
-    assert "unknown dataset" in out.err
-    assert {r.adapter for r in run.results} == set(OFFLINE_ADAPTERS)
+def test_run_validation_unknown_dataset_is_an_error() -> None:
+    # R4-V2-a: an unknown name used to be a stderr warning followed by PASS.
+    with pytest.raises(ValueError, match="unknown dataset 'nope'"):
+        run_validation_direct(small_config(), datasets=("nope",))
 
 
 # --- report -------------------------------------------------------------------
@@ -319,3 +318,186 @@ def test_golden_tolerance_boundary_is_1e4_of_the_span() -> None:
             c for c in compare_to_pins(moved, GOLDEN_PINS) if c.name == "coolant_temp_c golden mean"
         )
         assert mean_check.passed is ok, shift
+
+
+# --- no PASS without a comparison (P1-01: R4-T10-c, R4-T11-b, R4-V2-a, R4-V2-b) ---
+
+
+def _ved_fails(monkeypatch) -> None:
+    import validation.reference as ref
+
+    def _boom(cache_dir, handle=None):
+        raise RuntimeError("forced: no VED in test")
+
+    monkeypatch.setattr(ref, "_load_ved_frame", _boom)
+
+
+def test_requested_but_unavailable_ved_is_not_a_pass(monkeypatch) -> None:
+    _ved_fails(monkeypatch)
+    run = run_validation(small_config(), datasets=("ved",))
+    ved = next(r for r in run.results if r.adapter == "ved")
+    assert ved.available is False
+    assert not run.passed
+    md = render_report(run, datasets=("ved",))
+    assert "all checks passed" not in md
+    assert "`ved`" in md.split("## Adapters")[0]  # the summary names what did not run
+
+
+def test_cli_requested_but_unavailable_ved_exits_non_zero(tmp_path, monkeypatch, capsys) -> None:
+    _ved_fails(monkeypatch)
+    rc = main(["validate", "--config", _tiny_config_file(tmp_path), "--dataset", "ved"])
+    assert rc != 0
+    assert "FAIL" in capsys.readouterr().err
+
+
+def test_cli_unknown_dataset_is_a_usage_error(tmp_path, capsys) -> None:
+    rc = main(["validate", "--config", _tiny_config_file(tmp_path), "--dataset", "nosuch"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nosuch" in err and "PASS" not in err
+
+
+def test_ved_mirror_without_mapped_columns_is_unavailable(tmp_path) -> None:
+    # R4-T11-b: a real cached zip whose CSV has none of the mapped columns used to read
+    # every column, compare nothing, and report `ved` available with zero checks.
+    import zipfile
+
+    import validation.reference as ref
+
+    from can_telemetry_forge.sim import simulate
+
+    cache = tmp_path / "ved"
+    cache.mkdir()
+    with zipfile.ZipFile(cache / "owner__slug.zip", "w") as z:
+        z.writestr("combustion_master.csv", "RPM,Load,X\n800,10,1\n1500,50,2\n")
+    readings = simulate(small_config()).readings
+    result = ref._check_ved(readings, ref._units_map(), cache_dir=cache, handle="owner/slug")
+    assert result.available is False
+    assert "Engine_RPM_RPM" in result.note
+    assert not result.passed
+
+
+def test_adapter_with_zero_checks_is_not_a_pass() -> None:
+    from validation.reference import ReferenceResult, ValidationRun
+
+    empty = ReferenceResult(adapter="x", description="d", available=True)
+    assert not empty.passed
+    assert not ValidationRun(config=small_config(), results=[empty]).passed
+
+
+def test_in_spec_with_every_row_flagged_is_not_a_pass() -> None:
+    from validation.reference import _check_in_spec, _units_map
+
+    from can_telemetry_forge.sim import simulate
+
+    readings = simulate(small_config()).readings.copy()
+    readings["is_outlier"] = True
+    assert not _check_in_spec(readings, _units_map()).passed
+
+
+def test_expected_signal_with_no_values_fails_validation(monkeypatch) -> None:
+    # R4-V2-b: a signal the run's eras should report, NULL everywhere, used to drop
+    # its check silently and leave the run passing.
+    from validation import reference
+
+    real_simulate = reference.simulate
+
+    def nulled(config):
+        ds = real_simulate(config)
+        ds.readings["engine_speed_rpm"] = np.nan
+        return ds
+
+    reference._golden_drift_result.cache_clear()
+    monkeypatch.setattr(reference, "simulate", nulled)
+    try:
+        run = run_validation(small_config())
+    finally:
+        reference._golden_drift_result.cache_clear()
+    by = {r.adapter: r for r in run.results}
+    assert [c.name for c in by["in_spec"].checks if not c.passed] == [
+        "engine_speed_rpm has values"
+    ]
+    assert not by["golden"].passed
+    assert not run.passed
+
+
+def _dropping(monkeypatch, mutate) -> object:
+    """Run validation on the small config with ``mutate`` applied to the user's readings."""
+    from validation import reference
+
+    real_simulate = reference.simulate
+
+    def patched(config):
+        ds = real_simulate(config)
+        if config.seed == 7:  # the user run only; the golden profile stays untouched
+            mutate(ds)
+        return ds
+
+    monkeypatch.setattr(reference, "simulate", patched)
+    return run_validation(small_config())
+
+
+def test_expected_signal_missing_column_fails_validation(monkeypatch) -> None:
+    run = _dropping(monkeypatch, lambda ds: ds.readings.drop(columns="equipment_age_days", inplace=True))
+    in_spec = next(r for r in run.results if r.adapter == "in_spec")
+    assert "equipment_age_days has values" in [c.name for c in in_spec.checks if not c.passed]
+    assert not run.passed
+
+
+def test_expected_signal_null_for_one_era_fails_validation(monkeypatch) -> None:
+    from can_telemetry_forge.signals import Era, supported_signal_names
+    from can_telemetry_forge.sim import simulate
+
+    units = simulate(small_config()).units
+    eras = set(units["era"].astype(str))
+    assert len(eras) > 1, eras  # the test needs an era to hide behind another
+    era = min(eras, key=lambda e: Era[e].value)
+    signal = supported_signal_names(Era[era])[0]
+    ids = set(units.loc[units["era"].astype(str) == era, "unit_id"])
+
+    def null_one_era(ds):
+        ds.readings.loc[ds.readings["unit_id"].isin(ids), signal] = np.nan
+
+    run = _dropping(monkeypatch, null_one_era)
+    in_spec = next(r for r in run.results if r.adapter == "in_spec")
+    assert f"{signal} has values" in [c.name for c in in_spec.checks if not c.passed]
+    assert not run.passed
+
+
+def test_empty_validation_run_is_not_a_pass() -> None:
+    from validation.reference import ValidationRun
+
+    assert not ValidationRun(config=small_config(), results=[]).passed
+
+
+def test_ved_frame_without_mapped_columns_is_unavailable(monkeypatch) -> None:
+    import pandas as pd
+    import validation.reference as ref
+
+    from can_telemetry_forge.sim import simulate
+
+    monkeypatch.setattr(
+        ref, "_load_ved_frame", lambda cache_dir, handle=None: pd.DataFrame({"RPM": [800.0]})
+    )
+    result = ref._check_ved(simulate(small_config()).readings, ref._units_map())
+    assert result.available is False and not result.passed
+    assert "Engine_RPM_RPM" in result.note
+
+
+def test_ved_zero_overlap_is_a_failing_check(monkeypatch) -> None:
+    import pandas as pd
+    import validation.reference as ref
+
+    from can_telemetry_forge.sim import simulate
+
+    far = pd.DataFrame({"Engine_RPM_RPM": np.full(500, 1e7), "Absolute_Load_pct": np.full(500, 1e7)})
+    monkeypatch.setattr(ref, "_load_ved_frame", lambda cache_dir, handle=None: far)
+    result = ref._check_ved(simulate(small_config()).readings, ref._units_map())
+    assert result.checks and not result.passed
+
+
+def test_report_overall_glyph_is_fail_when_a_reference_did_not_run(monkeypatch) -> None:
+    _ved_fails(monkeypatch)
+    md = render_report(run_validation(small_config(), datasets=("ved",)), datasets=("ved",))
+    overall = next(line for line in md.splitlines() if line.startswith("- **Overall:**"))
+    assert "❌" in overall and "✅" not in overall

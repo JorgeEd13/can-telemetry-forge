@@ -1,6 +1,6 @@
 # State — can-telemetry-forge
 
-Updated: 2026-11-22
+Updated: 2026-11-23
 
 > 🧊 **FROZEN for feature work since 2026-10-03 — study block open.** This repo was cut into
 > **12 territories** by the APROFUNDAMENTOS programme (`repo-base-career/sistema/APROFUNDAMENTOS_ROADMAP.md`
@@ -8,6 +8,12 @@ Updated: 2026-11-22
 > guards by mutation, so a moving tree would invalidate the measurements. Findings from the study
 > go to this file's backlog rather than being fixed there. The freeze lifts when the R4 block
 > closes. It is a *convention*, not a mechanism — nothing enforces it; Jorge can lift it by saying so.
+
+## Unreleased
+
+- `forge validate` no longer reports PASS without a comparison (P1-01, 2026-11-23): a requested dataset that
+  could not run, an adapter with zero checks, or an era-expected signal with no values now fails the
+  run (exit 1); an unknown `--dataset` name exits 2. Generated data is unchanged.
 
 ## Current focus
 
@@ -591,7 +597,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   constants score 0.0 (degenerate range), and an empty side is 0.0 here but `None` in
   `summarise_signal`. Tests cover only identical / disjoint / empty. Fix: anchor the grid to the spec
   range or reference percentiles; return `None` for "cannot compare".
-- **R4-T10-c — a requested but unavailable `ved` still yields PASS and exit 0.** `ValidationRun.passed`
+- **R4-T10-c — ✅ Fixed 2026-11-23: `ValidationRun.passed` now requires every result to pass, so a requested `ved` that is unavailable fails the run (exit 1, report verdict "not a pass", summary lists it under "Did not run").** Original finding: a requested but unavailable `ved` still yields PASS and exit 0. `ValidationRun.passed`
   ignores unavailable adapters. Measured: `run_validation(..., datasets=("ved",))` with no Kaggle
   credentials and an empty cache → `passed=True`, `ved` `available=False`. The report summary says
   "all checks passed". Fix: a distinct outcome (or exit code) when a requested dataset did not run.
@@ -615,8 +621,8 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   body (34 bytes) the same way and leaves `tests/test_validation.py` at 17 passed. Fix: download to
   `*.part`, `os.replace` on success, delete on failure, and check `zipfile.is_zipfile` before trusting
   the cache.
-- **R4-T11-b — a mirror without the mapped columns reads every column and reports `ved` available with
-  zero checks.** `usecols=present or None` turns "no wanted column" into "all columns"; the comparison
+- **R4-T11-b — ✅ Fixed 2026-11-23: no mapped column = `ved` unavailable, with a note naming the expected columns (raised in `_read_ved_master`, guarded again in `_check_ved`); `usecols` no longer falls back to "all columns".** Original finding: a mirror without the mapped columns reads every column and reports `ved` available with
+  zero checks. `usecols=present or None` turns "no wanted column" into "all columns"; the comparison
   loop skips silently; the result is `available=True`, `checks=[]`, which the roll-up ignores.
   Measured: a CSV with columns `RPM, Load, X` → all three read, 0 comparisons, 0 checks,
   `run_validation(..., datasets=("ved",))` → `passed=True`. Fix: zero mapped columns = unavailable
@@ -681,11 +687,11 @@ repo session after the R4 block closes. Measured against the full suite (baselin
 - **R4-V2 — blind VERIFY over T10–T12.** Two blind instances (one on the code, one on the tests), then
   `auditor-claims`. Items already in R4-T10…T12 are not repeated here. "The three files" =
   `tests/test_{validation,writers,cli}.py` = 31 passed at baseline (full suite 135).
-- **R4-V2-a — an unknown `--dataset` name is a warning, then PASS and exit 0.** Measured:
+- **R4-V2-a — ✅ Fixed 2026-11-23: `run_validation` raises `UnknownDatasetError` before generating; `forge validate` prints it and exits 2. (Via: an error raised from the registry, not argparse `choices` — the CLI cannot import `validation/` when it builds the parser.)** Original finding: an unknown `--dataset` name is a warning, then PASS and exit 0. Measured:
   `forge validate --dataset nosuch` → stderr "unknown dataset 'nosuch', skipping.", "PASS", rc 0, report
   "Overall: all checks passed". Same family as R4-T10-c; fix together (argparse `choices` from the
   adapter registry).
-- **R4-V2-b — validation passes by vacuity on degenerate data.** Measured on `GOLDEN_PROFILE`: with every
+- **R4-V2-b — ✅ Fixed 2026-11-23: an adapter with 0 checks is not a pass, and `in_spec` fails "<signal> has values" when a signal that a CAN era present in the run should report has a missing column or no clean non-NULL value in that era's rows (checked per era, so MODERN units cannot hide all-NULL MID units). The golden half was already caught by the v0.3.0 pins ("golden present"); a test now pins it.** Original finding: validation passes by vacuity on degenerate data. Measured on `GOLDEN_PROFILE`: with every
   row `is_outlier=True`, `in_spec` produces 0 checks and the run passes; with `engine_speed_rpm` all NULL
   from the generator (fresh process), in_spec drops 11→10 checks and golden 9→8, and the run passes. The
   golden result is `lru_cache`d and regenerated independently, so NULLs only in the validated readings
@@ -720,6 +726,10 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   passed: `compare_distributions` ignoring the reference sample; `summarise_signal` p50 and p95 swapped;
   the report rendering no distribution tables. Extends R4-T10-b: `histogram_overlap(zeros(1000),
   normal(1500, 300, 1000) + [1e6])` = 0.9990 (1000/1001); without the extreme value, 0.0.
+- **R4-V2-i — offline adapter names are accepted as `--dataset` and reported as requested external datasets.**
+  Found by the P1-01 adversary (2026-11-23): `forge validate --dataset in_spec --dataset golden` runs nothing
+  extra, passes, and the report says "External datasets requested: `in_spec`, `golden`". Fix: accept only
+  network adapter names, or list only the ones that ran.
 - Unverified lead from R4-V2 (read): `__version__ = "0.2.0"` in `src/can_telemetry_forge/__init__.py`
   duplicates `pyproject.toml`.
 

@@ -199,6 +199,11 @@ a histogram-intersection overlap of **~0.48 (engine RPM) / ~0.51 (engine load)**
 against 200k VED rows. CI never requests it and the offline checks always stand on
 their own (rationale in [ADR-017](docs/DECISIONS.md)).
 
+`forge validate` never says PASS without having compared something: a requested
+`ved` that cannot run (no credentials, no mapped columns), an adapter with zero
+checks, or a signal the fleet's CAN eras should report but that has no values makes
+the run FAIL (exit 1); an unknown `--dataset` name exits 2.
+
 **Auth for `--dataset ved`.** The fetch uses the classic Kaggle REST endpoint with
 your **legacy** API credentials — put a `kaggle.json` (Kaggle → Settings → API →
 *Create Legacy API Key*) at `~/.kaggle/kaggle.json`. The dataset handle is

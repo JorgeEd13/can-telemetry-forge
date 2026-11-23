@@ -20,6 +20,7 @@ from . import __version__
 # the core never imports it). A non-zero exit code if any validation check fails.
 _VALIDATION_FAILED_EXIT = 1
 _VALIDATION_IMPORT_EXIT = 3
+_USAGE_EXIT = 2  # same code argparse uses for a bad argument
 
 
 def _write_utf8(stream, text: str) -> None:
@@ -200,6 +201,7 @@ def _run_validate(args: argparse.Namespace) -> int:
     _put_checkout_on_path()
     try:
         from validation import render_report, run_validation
+        from validation.reference import UnknownDatasetError
     except ImportError as exc:
         print(
             "forge validate: the opt-in validation package isn't importable "
@@ -216,7 +218,11 @@ def _run_validate(args: argparse.Namespace) -> int:
         config = replace(config, seed=args.seed).validate()
 
     datasets = tuple(args.dataset)
-    run = run_validation(config, datasets=datasets, ved_handle=args.ved_handle)
+    try:
+        run = run_validation(config, datasets=datasets, ved_handle=args.ved_handle)
+    except UnknownDatasetError as exc:
+        print(f"forge validate: {exc}", file=sys.stderr)
+        return _USAGE_EXIT
     report = render_report(run, datasets=datasets)
 
     if args.report:

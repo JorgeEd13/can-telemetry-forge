@@ -36,7 +36,13 @@ import numpy as np
 import pandas as pd
 
 from can_telemetry_forge.config import ForgeConfig, default_config
-from can_telemetry_forge.signals import TIER1_SIGNALS, get_spec, signal_names
+from can_telemetry_forge.signals import (
+    TIER1_SIGNALS,
+    Era,
+    get_spec,
+    signal_names,
+    supported_signal_names,
+)
 from can_telemetry_forge.sim import simulate
 
 from .compare import SignalComparison, compare_distributions, summarise_signal
@@ -96,8 +102,11 @@ class ReferenceResult:
 
     @property
     def passed(self) -> bool:
-        """True iff the adapter ran and every check passed."""
-        return self.available and all(c.passed for c in self.checks)
+        """True iff the adapter ran, produced at least one check, and every check passed.
+
+        Zero checks is not a pass: nothing was compared (R4-V2-b).
+        """
+        return self.available and bool(self.checks) and all(c.passed for c in self.checks)
 
 
 # A check takes the generated readings frame + the units map and returns a result.
@@ -152,18 +161,61 @@ def _clean_row_mask(readings: pd.DataFrame) -> np.ndarray:
     return ~readings["is_outlier"].to_numpy().astype(bool)
 
 
-def _check_in_spec(readings: pd.DataFrame, units: dict[str, str]) -> ReferenceResult:
+def _expected_signals(
+    readings: pd.DataFrame, units_frame: pd.DataFrame
+) -> dict[str, list[np.ndarray]]:
+    """Per signal, one row mask per CAN era present whose units should report it.
+
+    Checked per era, not run-wide: MODERN units carrying a MID signal must not hide
+    the MID units all emitting NULL for it.
+    """
+    unit_era = dict(zip(units_frame["unit_id"], units_frame["era"].astype(str), strict=True))
+    row_era = readings["unit_id"].map(unit_era).to_numpy()
+    expected: dict[str, list[np.ndarray]] = {}
+    for era_name in sorted({str(e) for e in units_frame["era"].unique()}):
+        mask = row_era == era_name
+        for name in supported_signal_names(Era[era_name]):
+            expected.setdefault(name, []).append(mask)
+    return expected
+
+
+def _check_in_spec(
+    readings: pd.DataFrame,
+    units: dict[str, str],
+    *,
+    expected: dict[str, list[np.ndarray]] | None = None,
+) -> ReferenceResult:
     """Every clean (non-defect) non-NULL signal value must lie within its J1939 range.
 
     Injected anomalies are out-of-range *by design* and excluded via the labels;
     this validates that the **generator** stays in spec, not that the deliberate
-    defects do.
+    defects do. ``expected`` maps a signal to the row masks of each era that should
+    report it; a missing column, or an era with no clean non-NULL value for it, is a
+    failure, not a skipped check (R4-V2-b).
     """
+    expected = expected or {}
     cols = _signal_columns(readings)
     comparisons = compare_distributions(cols, None, units)
     clean_rows = _clean_row_mask(readings)
     checks: list[CheckResult] = []
-    for name, values in cols.items():
+    for name in signal_names():
+        if name in expected and (
+            name not in cols
+            or not all(
+                np.isfinite(cols[name][clean_rows & mask]).any() for mask in expected[name]
+            )
+        ):
+            checks.append(
+                CheckResult(
+                    name=f"{name} has values",
+                    passed=False,
+                    detail="reported by the run's CAN eras, but an era has no clean non-NULL value",
+                )
+            )
+            continue
+        if name not in cols:
+            continue
+        values = cols[name]
         spec = get_spec(name)
         arr = np.asarray(values, dtype=float)
         clean = arr[clean_rows]
@@ -407,8 +459,12 @@ def _read_ved_master(zip_path: Path) -> pd.DataFrame:
             # Read the header to intersect usecols (a different mirror may differ).
             header = pd.read_csv(fh, nrows=0).columns
         present = [c for c in _VED_USECOLS if c in header]
+        if not present:
+            raise ValueError(
+                f"{member} has none of the expected VED columns {list(_VED_USECOLS)}"
+            )
         with z.open(member) as fh:
-            return pd.read_csv(fh, usecols=present or None, nrows=_VED_SAMPLE_ROWS)
+            return pd.read_csv(fh, usecols=present, nrows=_VED_SAMPLE_ROWS)
 
 
 def _load_ved_frame(cache_dir: Path, handle: str | None = None) -> pd.DataFrame:
@@ -454,7 +510,18 @@ def _check_ved(
             available=False,
             note=(
                 "VED reference unavailable (opt-in network fetch failed or skipped): "
-                f"{type(exc).__name__}: {exc}. Offline checks still validate the run."
+                f"{type(exc).__name__}: {exc}. Nothing was compared, so the run is not a pass."
+            ),
+        )
+
+    if not any(c in ved.columns for c in _VED_COLUMN_MAP.values()):
+        return ReferenceResult(
+            adapter="ved",
+            description=description,
+            available=False,
+            note=(
+                "VED reference unavailable: the dataset has none of the mapped columns "
+                f"{sorted(_VED_COLUMN_MAP.values())}."
             ),
         )
 
@@ -511,10 +578,14 @@ def get_adapter(name: str) -> ReferenceAdapter:
     return REFERENCE_ADAPTERS[name]
 
 
+class UnknownDatasetError(ValueError):
+    """A ``--dataset`` name that no reference adapter is registered under (R4-V2-a)."""
+
+
 @dataclass(frozen=True)
 class ValidationRun:
     """The full result of a validation pass: the config, the adapter results, and
-    a roll-up ``passed`` over the checks that actually ran.
+    a roll-up ``passed`` over every adapter that was run or requested.
     """
 
     config: ForgeConfig
@@ -522,9 +593,17 @@ class ValidationRun:
 
     @property
     def passed(self) -> bool:
-        """True iff every *available* adapter that produced checks passed them."""
-        ran = [r for r in self.results if r.available and r.checks]
-        return bool(ran) and all(r.passed for r in ran)
+        """True iff there are results and every one passed.
+
+        An unavailable (requested) adapter or one with zero checks makes the run
+        not a pass: PASS is never reported without a comparison (R4-T10-c).
+        """
+        return bool(self.results) and all(r.passed for r in self.results)
+
+    @property
+    def did_not_run(self) -> list[str]:
+        """Adapters that were requested but unavailable, or that produced no checks."""
+        return [r.adapter for r in self.results if not r.available or not r.checks]
 
 
 def run_validation(
@@ -543,19 +622,28 @@ def run_validation(
     the ``ved`` adapter compares against (else ``FORGE_VED_HANDLE`` /
     :data:`DEFAULT_VED_HANDLE`).
     """
+    unknown = [name for name in datasets if name not in REFERENCE_ADAPTERS]
+    if unknown:
+        raise UnknownDatasetError(
+            f"unknown dataset {unknown[0]!r} (known: {', '.join(REFERENCE_ADAPTERS)})"
+        )
     config = (config or default_config()).validate()
     ds = simulate(config)
     units = _units_map()
 
     results: list[ReferenceResult] = []
     for name in OFFLINE_ADAPTERS:
-        results.append(REFERENCE_ADAPTERS[name].check(ds.readings, units))
+        if name == "in_spec":
+            results.append(
+                _check_in_spec(
+                    ds.readings, units, expected=_expected_signals(ds.readings, ds.units)
+                )
+            )
+        else:
+            results.append(REFERENCE_ADAPTERS[name].check(ds.readings, units))
 
     for name in datasets:
-        adapter = REFERENCE_ADAPTERS.get(name)
-        if adapter is None:
-            print(f"forge validate: unknown dataset {name!r}, skipping.", file=sys.stderr)
-            continue
+        adapter = REFERENCE_ADAPTERS[name]
         if not adapter.network:
             continue  # offline adapters already ran
         if name == "ved":
@@ -576,6 +664,7 @@ __all__ = [
     "CheckResult",
     "ReferenceAdapter",
     "ReferenceResult",
+    "UnknownDatasetError",
     "ValidationRun",
     "compare_to_pins",
     "get_adapter",

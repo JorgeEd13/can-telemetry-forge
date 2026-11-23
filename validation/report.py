@@ -54,7 +54,7 @@ def _adapter_section(result: ReferenceResult) -> list[str]:
     if result.note:
         lines += [f"> {result.note}", ""]
     if not result.available:
-        lines += ["_Reference unavailable — offline checks still validated the run._", ""]
+        lines += ["_Reference unavailable — nothing was compared, so the run is not a pass._", ""]
         return lines
     if result.checks:
         lines += ["**Checks**", "", "| Check | Result | Detail |", "|---|---|---|"]
@@ -78,6 +78,13 @@ def render_report(run: ValidationRun, *, datasets: tuple[str, ...] = ()) -> str:
 
     ran = [r.adapter for r in run.results if r.available and r.checks]
     failed = [r.adapter for r in run.results if r.available and r.checks and not r.passed]
+    did_not_run = run.did_not_run
+    if run.passed:
+        verdict = "all checks passed"
+    elif failed:
+        verdict = "one or more checks failed"
+    else:
+        verdict = "not a pass: a requested reference did not run"
 
     lines = [
         "# Distribution validation report",
@@ -91,7 +98,7 @@ def render_report(run: ValidationRun, *, datasets: tuple[str, ...] = ()) -> str:
         "",
         "## Summary",
         "",
-        f"- **Overall:** {overall} {'all checks passed' if run.passed else 'one or more checks failed'}",
+        f"- **Overall:** {overall} {verdict}",
         f"- **Config:** seed `{cfg.seed}`, {cfg.days} day(s) @ `{cfg.resolution}`, "
         f"failure horizon {cfg.failure_horizon_h:g} h",
         f"- **Adapters with checks:** {', '.join(f'`{a}`' for a in ran) or 'none'}",
@@ -100,6 +107,11 @@ def render_report(run: ValidationRun, *, datasets: tuple[str, ...] = ()) -> str:
         lines.append(f"- **External datasets requested:** {', '.join(f'`{d}`' for d in datasets)}")
     if failed:
         lines.append(f"- **Failing adapters:** {', '.join(f'`{a}`' for a in failed)}")
+    if did_not_run:
+        lines.append(
+            "- **Did not run (unavailable or no checks):** "
+            f"{', '.join(f'`{a}`' for a in did_not_run)}"
+        )
     lines += ["", "## Adapters", ""]
     for result in run.results:
         lines += _adapter_section(result)
