@@ -202,7 +202,9 @@ their own (rationale in [ADR-017](docs/DECISIONS.md)).
 `forge validate` never says PASS without having compared something: a requested
 `ved` that cannot run (no credentials, no mapped columns), an adapter with zero
 checks, or a signal the fleet's CAN eras should report but that has no values makes
-the run FAIL (exit 1); an unknown `--dataset` name exits 2.
+the run FAIL (exit 4); an unknown `--dataset` name exits 2. A missing or invalid
+config (or a rejected override such as `forge generate --days 0`) exits 5 with a one-line message;
+exit 1 is only ever an uncaught error.
 
 **Auth for `--dataset ved`.** The fetch uses the classic Kaggle REST endpoint with
 your **legacy** API credentials — put a `kaggle.json` (Kaggle → Settings → API →

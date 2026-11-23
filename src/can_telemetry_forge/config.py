@@ -257,7 +257,9 @@ class ForgeConfig:
             raise ValueError(
                 f"resolution {self.resolution!r} not in {sorted(RESOLUTION_STEP_HOURS)}"
             )
-        if self.days <= 0:
+        if isinstance(self.seed, bool) or not isinstance(self.seed, (int, np.integer)) or self.seed < 0:
+            raise ValueError(f"seed must be a non-negative integer, got {self.seed!r}")
+        if not (0 < self.days < float("inf")):  # written so NaN and inf are rejected too
             raise ValueError("days must be positive")
         if self.obvious_outlier_rate is not None and not (0.0 <= self.obvious_outlier_rate < 1.0):
             raise ValueError("obvious_outlier_rate must be in [0, 1)")
@@ -268,7 +270,7 @@ class ForgeConfig:
         for atype, rate in self.anomaly_rates.items():
             if not (0.0 <= rate < 1.0):
                 raise ValueError(f"anomaly_rates[{atype!r}] must be in [0, 1)")
-        if self.failure_horizon_h <= 0:
+        if not (0 < self.failure_horizon_h < float("inf")):  # rejects NaN and inf too
             raise ValueError("failure_horizon_h must be positive")
         f = self.fleet
         class_ids = {vc.id for vc in f.vehicle_classes}

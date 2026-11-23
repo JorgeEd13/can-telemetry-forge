@@ -223,8 +223,9 @@ def _check_in_spec(
         if finite.size == 0:
             # Era-gated-away across the whole sample: nothing to range-check.
             continue
-        below = int((finite < spec.min_value).sum())
-        above = int((finite > spec.max_value).sum())
+        # A clean ±inf is out of range, not "missing" like NaN (P1-02 audit).
+        below = int((finite < spec.min_value).sum()) + int(np.isneginf(clean).sum())
+        above = int((finite > spec.max_value).sum()) + int(np.isposinf(clean).sum())
         ok = below == 0 and above == 0
         checks.append(
             CheckResult(

@@ -13,7 +13,14 @@ Updated: 2026-11-23
 
 - `forge validate` no longer reports PASS without a comparison (P1-01, 2026-11-23): a requested dataset that
   could not run, an adapter with zero checks, or an era-expected signal with no values now fails the
-  run (exit 1); an unknown `--dataset` name exits 2. Generated data is unchanged.
+  run; an unknown `--dataset` name exits 2. Generated data is unchanged.
+- **Exit codes changed** (P1-02, 2026-11-23): a failed validation now exits **4** (was 1, the same code
+  as any crash); a missing/invalid config, a rejected override, or an unwritable `--out`/`--report`
+  exits **5** with one stderr line; 1 is only an uncaught error. `ForgeConfig.validate` now also
+  rejects a non-integer, boolean or negative `seed` and a NaN/infinite `days`/`failure_horizon_h`
+  (previously a crash inside generation — or, for `seed: true`, silently seed 1). `in_spec` now counts
+  a clean ±inf as out of range (it was dropped like NaN). mypy lists `validation/` explicitly.
+  Generated data is unchanged for every config still accepted.
 
 ## Current focus
 
@@ -670,7 +677,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   inside `write_dataset` with a `ValueError` traceback (exit 1) instead of an argparse usage error
   (exit 2). Fix: `choices=FORMATS`, plus a test. `--resolution`/`--season` repeat lists owned by
   `config.py` (not measured).
-- **R4-T12-e — exit 1 means both "validation failed" and "any uncaught error".** Measured:
+- **R4-T12-e — ✅ Fixed 2026-11-23: validation failure exits 4, bad config/input exits 5 with a one-line message (translated only around config loading and the `--out`/`--report` writes), 1 is left to uncaught errors; pinned by 15 cases in `tests/test_cli.py`.** Original finding: exit 1 means both "validation failed" and "any uncaught error". Measured:
   `forge validate --config /nope.json` → 1, `forge generate --out X --config /nope.json` → 1,
   `generate --out X --days 0` → 1 (traceback); validation failure returns `_VALIDATION_FAILED_EXIT = 1`
   (read from the code, not run). Fix: a distinct code for validation failure, and translate config/input errors in
@@ -702,7 +709,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   reach the comparison, 671,506 of them `is_outlier`; `engine_speed_rpm` max 12,048.8 vs spec max
   8,031.875, 34,724 values above it. Combined with R4-T10-b, these values stretch the overlap grid. Fix:
   apply the same clean-row mask before comparing.
-- **R4-V2-d — the pass/fail gate has no test and no CI step.** Measured, each alone → full suite 135
+- **R4-V2-d — ✅ Fixed 2026-11-23: `tests/test_cli.py` feeds a run with one clean value below its J1939 minimum (finite, and −inf, which `in_spec` used to drop like NaN) and asserts exit 4 / `run.passed is False` (kills all three measured mutations); mypy `files` now lists `validation/`. Note: at the fix's base commit mypy already reached `validation/` transitively through `cli.py`'s lazy import, so the injected-error measurement no longer reproduced; the explicit entry makes coverage independent of that import. The tests run in the existing CI matrix; no separate `forge validate` CI step was added.** Original finding: the pass/fail gate has no test and no CI step. Measured, each alone → full suite 135
   passed: `ValidationRun.passed` always `True`; `_run_validate` always returning 0; `_check_in_spec`
   ignoring values below the minimum. `ci.yml` never runs `forge validate`, and mypy (`files = ["src"]`)
   does not cover the top-level `validation/` package: an injected `x: int = "str"` in
@@ -726,6 +733,12 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   passed: `compare_distributions` ignoring the reference sample; `summarise_signal` p50 and p95 swapped;
   the report rendering no distribution tables. Extends R4-T10-b: `histogram_overlap(zeros(1000),
   normal(1500, 300, 1000) + [1e6])` = 0.9990 (1000/1001); without the extreme value, 0.0.
+- **R4-V2-j — NaN in config numeric fields other than `days`/`failure_horizon_h` is not swept.**
+  Lead from P1-02 (2026-11-23, not measured): `validate()` now rejects NaN `days`/`failure_horizon_h`
+  (the two the adversary reproduced), but unit counts, `duty_bias`, rates' siblings and multipliers
+  were not checked for NaN/inf; any that slips through crashes inside generation with exit 1. Also
+  (measured by the P1-02 auditor): an unknown top-level config key such as `bogus_key` is accepted
+  silently (rc 0, PASS) — a typo in a key name falls back to the default without a word.
 - **R4-V2-i — offline adapter names are accepted as `--dataset` and reported as requested external datasets.**
   Found by the P1-01 adversary (2026-11-23): `forge validate --dataset in_spec --dataset golden` runs nothing
   extra, passes, and the report says "External datasets requested: `in_spec`, `golden`". Fix: accept only

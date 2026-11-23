@@ -16,11 +16,38 @@ from collections.abc import Sequence
 
 from . import __version__
 
+# Exit codes. Each failure kind has its own code so a script can tell them apart;
+# 1 is left to Python's default for an uncaught exception (a bug, not a verdict).
 # `forge validate` lives in the opt-in ``validation/`` package (outside ``src/`` —
-# the core never imports it). A non-zero exit code if any validation check fails.
-_VALIDATION_FAILED_EXIT = 1
-_VALIDATION_IMPORT_EXIT = 3
+# the core never imports it).
 _USAGE_EXIT = 2  # same code argparse uses for a bad argument
+_VALIDATION_IMPORT_EXIT = 3
+_VALIDATION_FAILED_EXIT = 4  # validation ran and at least one check failed
+_INPUT_ERROR_EXIT = 5  # unreadable / invalid config or override
+
+
+class _InputError(Exception):
+    """A config or override the user supplied cannot be used (one-line message)."""
+
+
+def _load_cli_config(args: argparse.Namespace, **overrides):
+    """Load ``--config`` and apply ``overrides``; raise :class:`_InputError` on bad input.
+
+    Only this phase is translated: an error here comes from what the user typed (a
+    missing file, malformed JSON, a value ``ForgeConfig.validate`` rejects). Errors
+    later on (simulation, writing) stay uncaught on purpose.
+    """
+    from dataclasses import replace
+
+    from .config import load_config
+
+    try:
+        config = load_config(args.config)
+        if overrides:
+            config = replace(config, **overrides).validate()
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError) as exc:
+        raise _InputError(f"invalid config or option: {exc}") from exc
+    return config
 
 
 def _write_utf8(stream, text: str) -> None:
@@ -136,13 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _run_generate(args: argparse.Namespace) -> int:
     """Execute ``forge generate`` over the library. Returns an exit code."""
-    from dataclasses import replace
-
-    from .config import load_config, resolve_season
+    from .config import resolve_season
     from .io import write_dataset
     from .sim import simulate
 
-    config = load_config(args.config)
     overrides: dict = {}
     if args.seed is not None:
         overrides["seed"] = args.seed
@@ -154,11 +178,13 @@ def _run_generate(args: argparse.Namespace) -> int:
         overrides["season"] = resolve_season(args.season)
     if args.emit_raw_frames:
         overrides["emit_raw_frames"] = True
-    if overrides:
-        config = replace(config, **overrides).validate()
+    config = _load_cli_config(args, **overrides)
 
     dataset = simulate(config)
-    out = write_dataset(dataset, args.out, fmt=args.format)
+    try:
+        out = write_dataset(dataset, args.out, fmt=args.format)
+    except OSError as exc:  # e.g. --out names an existing file
+        raise _InputError(f"cannot write --out {args.out!r}: {exc}") from exc
     print(
         f"forge generate: wrote {dataset.readings.shape[0]:,} readings for "
         f"{dataset.units.shape[0]} units → {out} ({args.format}, seed {config.seed}).",
@@ -196,8 +222,6 @@ def _run_validate(args: argparse.Namespace) -> int:
     committed). The validation package lives outside ``src/`` and is imported here
     lazily so the core library never depends on it.
     """
-    from dataclasses import replace
-
     _put_checkout_on_path()
     try:
         from validation import render_report, run_validation
@@ -211,11 +235,8 @@ def _run_validate(args: argparse.Namespace) -> int:
         )
         return _VALIDATION_IMPORT_EXIT
 
-    from .config import load_config
-
-    config = load_config(args.config)
-    if args.seed is not None:
-        config = replace(config, seed=args.seed).validate()
+    overrides = {"seed": args.seed} if args.seed is not None else {}
+    config = _load_cli_config(args, **overrides)
 
     datasets = tuple(args.dataset)
     try:
@@ -228,7 +249,10 @@ def _run_validate(args: argparse.Namespace) -> int:
     if args.report:
         from pathlib import Path
 
-        Path(args.report).write_text(report, encoding="utf-8")
+        try:
+            Path(args.report).write_text(report, encoding="utf-8")
+        except OSError as exc:
+            raise _InputError(f"cannot write --report {args.report!r}: {exc}") from exc
         print(f"forge validate: wrote report -> {args.report}", file=sys.stderr)
     else:
         # The report carries non-ASCII (status glyphs); write UTF-8 directly so it
@@ -253,11 +277,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 0
 
-    if args.command == "generate":
-        return _run_generate(args)
+    try:
+        if args.command == "generate":
+            return _run_generate(args)
 
-    if args.command == "validate":
-        return _run_validate(args)
+        if args.command == "validate":
+            return _run_validate(args)
+    except _InputError as exc:
+        print(f"forge {args.command}: {exc}", file=sys.stderr)
+        return _INPUT_ERROR_EXIT
 
     parser.print_help()  # pragma: no cover - argparse rejects unknown commands first
     return 0
