@@ -87,6 +87,15 @@ and passed down every stage. No module calls a global random source.
 **Consequences.** Same seed → identical data; tests can assert exact
 reproducibility; the dataset is regenerable by anyone from `config + seed`.
 
+**Note 2026-11-23 (R4-T4-a) — the code builds a seed tree, not one shared generator.**
+`simulate()` builds one `numpy.random.SeedSequence(config.seed)` and **spawns**
+independent children from it: one for fleet composition, then one per unit per stage
+(drivers, signals, labels, and one per anomaly injector). Each stage gets its own
+`default_rng(child)`. The principle above holds (all randomness derives from the
+config seed, no global random source); the "single generator threaded through" wording
+did not. The unused `ForgeConfig.rng()` helper was removed. Caveat: children are keyed
+by position, so adding a stream slot reseeds the units (R4-T4-b in `docs/STATE.md`).
+
 ---
 
 ## ADR-006 — Labeled anomaly/fault injection (every defect is recoverable)
@@ -211,6 +220,11 @@ model, while a small test profile stays CI-friendly.
 **Consequences.** One command scales from a browsable demo to a trainable dataset.
 Tests run on the small profile; the README documents both. More config surface to
 validate.
+
+**Note 2026-11-23 (R4-T3-d) — the default fleet is no longer ~100 units.** The default
+config's contracts expect **140** units in total since F5 added two contracts (104 at
+F2); the actual count is drawn around each contract's expected size, so a run lands
+near, not exactly at, 140.
 
 > **Provenance note (private boundary).** The *plausibility intuition* behind fleet
 > proportions may be informed privately by the author's real-world operational
@@ -383,8 +397,8 @@ outside `src/` — the core never imports it), mirroring the signal/anomaly regi
 (ADR-012/-016). Each adapter is self-describing (`name`, `description`, a `network`
 flag, a `check` fn → per-signal comparisons + pass/fail checks). Three ship:
 
-- **`in_spec`** (offline) — every non-NULL value must sit inside its documented
-  J1939 range from the signal registry. Catches out-of-spec generation.
+- **`in_spec`** (offline) — every non-NULL clean value (rows flagged `is_outlier`
+  excluded; see the 2026-11-23 note) must sit inside its documented J1939 range from the signal registry. Catches out-of-spec generation.
 - **`golden`** (offline) — per-signal mean/std must match a **recomputed** pinned
   reference run (fixed seed/profile). The reference is *regenerated*, never stored as
   data (determinism, ADR-005), so nothing is committed; it catches silent drift in
@@ -427,11 +441,20 @@ detail a reader hits too):
    (`pip-system-certs` → use the Windows trust store), **not** disabling verification.
    Noted so a future run on such a host knows the cause.
 3. *The handle must be configurable.* The originally-assumed handle didn't exist; a
-   single hardcoded handle rots. The adapter takes `--ved-handle` / `FORGE_VED_HANDLE`
-   / `ved_handle` config, defaulting to a **verified** mirror (`yashseth25/ved-segregated`,
+   single hardcoded handle rots. The adapter takes `--ved-handle` / `FORGE_VED_HANDLE`,
+   defaulting to a **verified** mirror (`yashseth25/ved-segregated`,
    CC-BY 4.0), and skips any mapped column the chosen mirror doesn't carry. Verified
    live: synthetic vs VED histogram overlap **0.48 (engine RPM) / 0.51 (engine load)**
    over 200k VED rows — plausible for the shared channels, as framed.
+
+**Note 2026-11-23 (R4-T11-e) — what the adapter actually has.** Of the four overlapping
+channels named in the context, the adapter compares only two: engine RPM
+(`Engine_RPM_RPM`) and engine load (`Absolute_Load_pct`) — `_VED_COLUMN_MAP` in
+`validation/reference.py`; fuel rate and coolant are not mapped, and nothing else is
+read from the VED file. The handle is set by `--ved-handle` or `FORGE_VED_HANDLE` only;
+there is no `ved_handle` key in the config file (the addendum above first listed one too).
+`in_spec` skips rows flagged `is_outlier` (they carry an injected defect by design), so
+it checks every clean value, not every value as the decision first said.
 
 ---
 

@@ -26,6 +26,10 @@ Updated: 2026-11-23
   collapses the grid; it returns `None` (was 0.0) when a side has no finite value. The `ved` adapter
   now compares only clean (non-`is_outlier`) generated rows. `ved` overlap numbers in a report differ
   from earlier runs. Generated data is unchanged.
+- **`ForgeConfig.rng()` removed** (P1-04, 2026-11-23): it had no caller; randomness comes from the
+  `SeedSequence` spawn tree in `simulate()`. The `ved` adapter no longer reads `MAF_g_per_sec` (it was
+  never compared). Docs (README, ADR-005/-011/-017, DATA_DESIGN §3/§11, ARCHITECTURE, DATA_DICTIONARY)
+  now match the code, pinned by `tests/test_docs.py`. Generated data is unchanged.
 
 ## Current focus
 
@@ -176,7 +180,7 @@ Default fleet unchanged at **134 units**. **The planned roadmap (F0–F6) is com
     (`www.kaggle.com/api/v1`) with **HTTP Basic auth** from `~/.kaggle/kaggle.json`
     (only `requests` needed, SDKs dropped from the extra); TLS termination →
     `pip-system-certs` (Windows trust store, not verify=False); the **VED handle is
-    configurable** (`--ved-handle`/`FORGE_VED_HANDLE`/config, default verified
+    configurable** (`--ved-handle`/`FORGE_VED_HANDLE`, default verified
     `yashseth25/ved-segregated`) because the originally-assumed handle didn't exist.
     The 510 MB zip lands in the git-ignored cache, read capped (200k rows × mapped
     cols), never committed.
@@ -326,8 +330,8 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   (was 0.14), and `config_from_dict` merges onto it. `anomaly_rates` uses a copying
   `default_factory` and is not affected. Fix: build the default fleet per call, or store the mix as
   an immutable mapping.
-- **R4-T3-d — DATA_DESIGN §3 says the class mix varies by contract and region; the schema has one
-  global mix.** `Contract` has only `duty_bias`, and `build_fleet` draws every unit with one weight
+- **R4-T3-d — ✅ Fixed 2026-11-23: DATA_DESIGN §3 now says one fleet-wide `vehicle_mix` is shared by every contract (contracts vary `duty_bias` and size; region does not pick classes), and ADR-011 has a dated note: the default expects 140 units. Reworded, not implemented: a per-contract mix is a schema change no consumer asks for. `tests/test_docs.py` reads both.** Original finding: DATA_DESIGN §3 says the class mix varies by contract and region; the schema has one
+  global mix. `Contract` has only `duty_bias`, and `build_fleet` draws every unit with one weight
   vector built from `FleetSpec.vehicle_mix` (`sim/fleet.py`, before the contract loop). ADR-011 says
   "~100 units"; the default expects 140 since F5 (104 at F2). Fix: a per-contract mix override, or
   reword §3; add a dated note to ADR-011.
@@ -336,8 +340,8 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   `validate()` promises a "fully covered" check the code does not make (no failure observed: `build_fleet` picks among a class's models, so any class with one model is covered); `arid_highland` cites Köppen
   BWk with a 22 °C mean, above the 18 °C bound usually given for the "k" suffix; `altitude_m` and
   `wear_modifier` cite no source; `SEASONS` entries may be shared the same way as the mix.
-- **R4-T4-a — ADR-005, DATA_DESIGN §11, ARCHITECTURE and DATA_DICTIONARY describe a single
-  generator; the code spawns a seed tree.** All four say one seeded generator is threaded through
+- **R4-T4-a — ✅ Fixed 2026-11-23: ADR-005 has a dated note, and DATA_DESIGN §11, ARCHITECTURE, DATA_DICTIONARY and the `config.py` module docstring describe the `SeedSequence` spawn tree (one child for the fleet, one per unit per stage); the uncalled `ForgeConfig.rng()` was deleted (no caller here or in `forge-pdm-mlops`). `tests/test_docs.py` reads each section.** Original finding: ADR-005, DATA_DESIGN §11, ARCHITECTURE and DATA_DICTIONARY describe a single
+  generator; the code spawns a seed tree. All four say one seeded generator is threaded through
   every stage; `simulate()` builds a `SeedSequence` and spawns one child for the fleet plus one per
   unit per stage (described correctly only in `docs/ROADMAP.md`, this file, and partly in the
   ADR-019 note on per-injector streams). `ForgeConfig.rng()` ("Child rngs spawn from this")
@@ -617,8 +621,8 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   `test_report_is_self_contained_markdown` asserts nothing (its comment describes an assertion that
   was never written); `test_golden_drift_guard_passes` only asserts the pass; adding three CAN signals
   to `_FLEET_DERIVED` drops 3 golden checks and leaves `tests/test_validation.py` at 17 passed.
-- **R4-T10-e — the README says `in_spec` checks "every value"; it checks rows without an injected
-  defect.** Rows flagged `is_outlier` are excluded for all signals (deliberately: without the mask,
+- **R4-T10-e — ✅ Fixed 2026-11-23: the README and the ADR-017 `in_spec` bullet say "every clean value" and name the `is_outlier` exclusion; `tests/test_docs.py` reads both.** Original finding: the README says `in_spec` checks "every value"; it checks rows without an injected
+  defect. Rows flagged `is_outlier` are excluded for all signals (deliberately: without the mask,
   six signals fail on the one-day test config). Fix: say "every clean value" in the README.
 - Unverified leads from R4-T10: golden stats include injected anomalies (no clean-row mask, unlike
   `in_spec`); the golden `@lru_cache` serves a stale result if the generator is patched in-process;
@@ -652,7 +656,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   `_VED_MIN_OVERLAP` 0.30 → 0.0, removing the cache short-circuit, and removing `raise_for_status()`
   each leave 17 passed; only inverting handle precedence fails a test. Fix: a local zip fixture and a
   fake HTTP response at the transport level so the real loader, cache and threshold run.
-- **R4-T11-e — ADR-017 and the adapter comments describe more than the code.** They mention a
+- **R4-T11-e — ✅ Fixed 2026-11-23: ADR-017 has a dated note (compares two channels, `Engine_RPM_RPM` and `Absolute_Load_pct`; no `ved_handle` config key) and the stray "/ `ved_handle` config" is gone from it and from `validation/reference.py`; `MAF_g_per_sec` is no longer read (`_VED_USECOLS` is now the mapped columns). `tests/test_docs.py` checks the sentences, the real `_read_ved_master` on a zip with extra columns, and the flag → env → default handle order.** Original finding: ADR-017 and the adapter comments describe more than the code. They mention a
   `ved_handle` config key that `config.py` does not have (only `--ved-handle` and `FORGE_VED_HANDLE`
   exist, as the README correctly says); the ADR context lists four overlapping channels (RPM, load,
   fuel rate, coolant) while `_VED_COLUMN_MAP` compares two; `MAF_g_per_sec` is read "for the report's

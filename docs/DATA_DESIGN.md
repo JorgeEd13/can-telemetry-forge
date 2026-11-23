@@ -69,16 +69,20 @@ A real operator is **not** a uniform pool of identical machines. The generator
 models the actual structure:
 
 - **Vehicle / machinery mix** — distinct classes (e.g. haul trucks, loaders,
-  excavators, compactors, light support vehicles), in realistic proportions that
-  vary **by contract type**. A dense-urban collection contract has a different mix
-  than a long-haul or earthworks contract.
+  excavators, compactors, light support vehicles), in realistic proportions. The
+  proportions are **one fleet-wide mix** (`fleet.vehicle_mix`): every contract draws
+  its units from the same weights. What varies by contract is how hard the units
+  are run (`duty_bias`) and how many there are. A per-contract mix is not
+  implemented.
 - **Fleet age curve** — units are not all new. Build year follows a realistic
   distribution (a tail of older machines still in service), because age drives both
   failure hazard **and** CAN capability (§4).
 - **Units per contract** — contract size follows a realistic distribution, not a
   constant.
-- **City/region → vehicle fit** — the *kind* of region influences which vehicle
-  classes are deployed there and how hard they're run (duty cycle).
+- **City/region → vehicle fit** — the *kind* of region influences how hard units
+  are run (each contract sits in one region and carries its `duty_bias`) and, via
+  the environment modifiers (§6), how they wear; it does not change which classes
+  are deployed there (see the mix above).
 
 All of these are **config-driven and seeded**: change the config → a different but
 equally plausible fleet; same seed → the identical fleet.
@@ -341,8 +345,10 @@ J1939 SPN where applicable, and its capability era.
 ## 11. Reproducibility
 
 Everything regenerates from **config + seed**. Same seed → identical data (fleet,
-signals, environment draws, hazard events, injected faults). No global randomness;
-a single seeded generator is threaded through every layer.
+signals, environment draws, hazard events, injected faults). No global randomness:
+one `numpy.random.SeedSequence` built from the seed is **spawned** into independent
+children — one for the fleet, then one per unit per stage (drivers, signals, labels,
+each anomaly injector) — and each stage draws from its own child generator.
 
 ---
 

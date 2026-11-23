@@ -33,9 +33,10 @@ CLI                 forge generate … ;  forge validate …
 
 ## Design rules
 
-- **Deterministic by construction.** A single seeded random generator is created
-  from the config and threaded through every stage. No module touches a global
-  random source. Same seed → byte-identical tables.
+- **Deterministic by construction.** One `numpy.random.SeedSequence` is built from
+  the config seed and **spawned** into independent children: one for the fleet,
+  then one per unit per stage (drivers, signals, labels, each anomaly injector).
+  No module touches a global random source. Same seed → byte-identical tables.
 - **Separation of concerns.** The signal model knows nothing about fleets; the
   simulator composes signals; injection and labeling are post-processing stages
   over generated tables; writers are pure I/O and never generate.

@@ -4,9 +4,9 @@ A :class:`ForgeConfig` is the single, declarative description of *what to
 generate*: the fictional operator's fleet scale, the contrasting regions it works
 in, the vehicle-class mix and age curve, the time resolution and window, the
 obvious-outlier rate, and the master ``seed``. Everything downstream is a pure,
-deterministic function of this config (ADR-005): the simulator builds one seeded
-``numpy`` generator from ``seed`` and threads child generators through every stage,
-so the same config + seed yields byte-identical tables.
+deterministic function of this config (ADR-005): the simulator builds one
+``numpy.random.SeedSequence`` from ``seed`` and spawns one child for the fleet plus
+one per unit per stage, so the same config + seed yields byte-identical tables.
 
 Provenance (ADR-010, ADR-014). The regions are a **fictional international
 operator's** deployments, but each region's climate and terrain constants are
@@ -246,10 +246,6 @@ class ForgeConfig:
     def n_steps(self) -> int:
         """Number of timestamps per unit over the window."""
         return round(self.days * 24.0 / self.step_hours())
-
-    def rng(self) -> np.random.Generator:
-        """The master seeded generator (ADR-005). Child rngs spawn from this."""
-        return np.random.default_rng(self.seed)
 
     def validate(self) -> ForgeConfig:
         """Raise ``ValueError`` on an inconsistent config; return self on success."""

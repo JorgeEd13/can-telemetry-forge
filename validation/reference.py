@@ -384,9 +384,8 @@ _VED_COLUMN_MAP: dict[str, str] = {
 }
 
 # Only read the columns we actually compare (the VED master CSV is ~500 MB; reading a
-# couple of columns keeps the opt-in check light). Mass-air-flow is pulled too as a
-# documented load/fuel proxy for the report's context, even though we don't score it.
-_VED_USECOLS: tuple[str, ...] = ("Engine_RPM_RPM", "Absolute_Load_pct", "MAF_g_per_sec")
+# couple of columns keeps the opt-in check light).
+_VED_USECOLS: tuple[str, ...] = tuple(_VED_COLUMN_MAP.values())
 
 # Read at most this many rows from the VED master for the distribution sample — plenty
 # for a stable histogram while keeping the parse fast on the multi-hundred-MB file.
@@ -397,7 +396,7 @@ _VED_MIN_OVERLAP = 0.30  # a generous floor — VED is light-vehicle, not heavy 
 
 # The Kaggle dataset handle (``owner/slug``) the ved adapter compares against.
 # Configurable on purpose (a single hardcoded handle rots — datasets get renamed /
-# removed): overridable via ``--ved-handle`` / the ``ved_handle`` config, or the
+# removed): overridable via ``--ved-handle`` (``run_validation(ved_handle=...)``) or the
 # ``FORGE_VED_HANDLE`` env var. The default is a **verified** published VED mirror
 # whose "combustion master" CSV carries the OBD-II columns in ``_VED_COLUMN_MAP``.
 DEFAULT_VED_HANDLE = "yashseth25/ved-segregated"

@@ -89,8 +89,9 @@ These **signs** are the credibility of the dataset; they are implemented in
 
 ## Determinism
 
-All signals come from a single seeded `numpy` generator threaded in by the caller
-(ADR-005). Same era + drivers + seed → identical arrays. The hour-meter
+All signals come from a seeded `numpy` generator passed in by the caller: the
+simulator spawns it from the config seed's `SeedSequence`, one child per unit per
+stage (ADR-005). Same era + drivers + seed → identical arrays. The hour-meter
 (`runtime_hours`) and `equipment_age_days` are noise-free by construction.
 
 ## Label & anomaly columns (in `readings`)

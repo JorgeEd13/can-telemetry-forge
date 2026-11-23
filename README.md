@@ -172,7 +172,8 @@ io.write_dataset`), so the future MLOps repo can import it directly.
 a self-contained Markdown report. It runs two **offline** reference adapters by
 default — so it needs no network and is reproducible by anyone:
 
-- **`in_spec`** — every value sits inside its documented SAE J1939 range.
+- **`in_spec`** — every clean value sits inside its documented SAE J1939 range (rows flagged
+  `is_outlier`, i.e. carrying an injected defect, are excluded on purpose).
 - **`golden`** — a fixed-seed run's per-signal mean / std / p05 / p95 must match
   pinned values committed in `validation/golden_pins.py`, within 1e-4 of each
   signal's J1939 span (catches silent drift in the generator itself; an intentional
