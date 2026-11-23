@@ -6,10 +6,11 @@ The math the adapters share: per-signal summary statistics and a bounded
 is reproducible.
 
 The overlap score is the classic **histogram intersection** on a shared bin grid:
-``sum(min(p_i, q_i))`` over density-normalised histograms ``p`` (generated) and
-``q`` (reference). It is 1.0 for identical distributions and 0.0 for disjoint
-ones, symmetric, and needs no distributional assumptions — a robust, explainable
-"do these look alike?" number for a portfolio report.
+``sum(min(p_i, q_i))`` over per-bin probability masses ``p`` (generated) and
+``q`` (reference), on a grid anchored to both samples' central ranges so one
+extreme value cannot collapse it. It is 1.0 for identical distributions and 0.0
+for disjoint ones, symmetric, and needs no distributional assumptions — a robust,
+explainable "do these look alike?" number for a portfolio report.
 """
 
 from __future__ import annotations
@@ -53,28 +54,48 @@ def _finite(values: np.ndarray) -> np.ndarray:
     return arr[np.isfinite(arr)]
 
 
+# Grid anchor: each sample's central range, from this percentile to its mirror.
+# Values outside the grid are clipped into the edge bins, so a few extreme values
+# (up to this share of either sample) cannot stretch the grid and collapse both
+# samples into one bin (R4-T10-b).
+_GRID_TAIL_PCT = 0.5
+
+
 def histogram_overlap(
     generated: np.ndarray, reference: np.ndarray, *, bins: int = _DEFAULT_BINS
-) -> float:
+) -> float | None:
     """Histogram-intersection overlap of two samples on a shared grid → ``[0, 1]``.
 
-    Both samples are reduced to density-normalised histograms over the *combined*
-    value range, then scored as ``sum(min(p_i, q_i)) × bin_width``. Returns 0.0 if
-    either sample is empty or the shared range is degenerate (cannot compare).
+    The grid spans the union of both samples' central ranges (the
+    ``_GRID_TAIL_PCT``…``100 - _GRID_TAIL_PCT`` percentiles); values outside it are
+    clipped into the edge bins, so extreme values amounting to at most
+    ``_GRID_TAIL_PCT`` % of either sample cannot stretch it. The score is
+    ``sum(min(p_i, q_i))`` over the two per-bin probability masses. Returns ``None`` if either sample has no finite
+    value (cannot compare); two samples of the same constant score 1.0.
     """
     g = _finite(generated)
     r = _finite(reference)
     if g.size == 0 or r.size == 0:
-        return 0.0
-    lo = float(min(g.min(), r.min()))
-    hi = float(max(g.max(), r.max()))
-    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-        return 0.0
+        return None
+    # Inward, non-interpolating ranks: an interpolated percentile would blend in an
+    # outlier at exactly the tail share and stretch the grid anyway.
+    g_lo, r_lo = (np.percentile(x, _GRID_TAIL_PCT, method="higher") for x in (g, r))
+    g_hi, r_hi = (np.percentile(x, 100.0 - _GRID_TAIL_PCT, method="lower") for x in (g, r))
+    lo, hi = float(min(g_lo, r_lo)), float(max(g_hi, r_hi))
+    if hi <= lo:
+        # Both central ranges are the same single value: fall back to the full range.
+        lo = float(min(g.min(), r.min()))
+        hi = float(max(g.max(), r.max()))
+        if hi <= lo:
+            return 1.0  # every value on both sides is the same constant
+    if not np.isfinite(hi - lo):
+        # The span overflows float64 (values near ±1e308): bin on a rescaled copy.
+        scale = max(abs(lo), abs(hi))
+        g, r, lo, hi = g / scale, r / scale, lo / scale, hi / scale
     edges = np.linspace(lo, hi, bins + 1)
-    gh, _ = np.histogram(g, bins=edges, density=True)
-    rh, _ = np.histogram(r, bins=edges, density=True)
-    width = (hi - lo) / bins
-    return float(np.minimum(gh, rh).sum() * width)
+    gh, _ = np.histogram(np.clip(g, lo, hi), bins=edges)
+    rh, _ = np.histogram(np.clip(r, lo, hi), bins=edges)
+    return float(np.minimum(gh / g.size, rh / r.size).sum())
 
 
 def summarise_signal(
@@ -101,7 +122,7 @@ def summarise_signal(
     if reference is not None:
         r = _finite(reference)
         ref_n = int(r.size)
-        overlap = histogram_overlap(g, r, bins=bins) if r.size else None
+        overlap = histogram_overlap(g, r, bins=bins)
     return SignalComparison(
         signal=signal, unit=unit, n=int(g.size),
         gen_min=float(g.min()), gen_max=float(g.max()), gen_mean=float(g.mean()),

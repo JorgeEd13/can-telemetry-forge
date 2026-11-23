@@ -21,6 +21,11 @@ Updated: 2026-11-23
   (previously a crash inside generation — or, for `seed: true`, silently seed 1). `in_spec` now counts
   a clean ±inf as out of range (it was dropped like NaN). mypy lists `validation/` explicitly.
   Generated data is unchanged for every config still accepted.
+- **Overlap scores changed** (P1-03, 2026-11-23): `histogram_overlap` bins on a grid anchored to both
+  samples' 0.5–99.5 percentile ranges instead of their min/max, so one extreme value no longer
+  collapses the grid; it returns `None` (was 0.0) when a side has no finite value. The `ved` adapter
+  now compares only clean (non-`is_outlier`) generated rows. `ved` overlap numbers in a report differ
+  from earlier runs. Generated data is unchanged.
 
 ## Current focus
 
@@ -598,7 +603,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   run (catches silent drift…)"), ADR-017, ROADMAP F4, the package/module docstrings and the adapter
   description ("seed-stable") say otherwise. Fix: freeze per-signal mean/std/p05/p95 of the golden
   profile as literals in a test with a relative tolerance; add a test that a shifted generator fails.
-- **R4-T10-b — the histogram-overlap bin grid comes from the pair's own min/max.** One extreme value
+- **R4-T10-b — ✅ Fixed 2026-11-23: the overlap grid is anchored to both samples' 0.5–99.5 percentile ranges (non-interpolating ranks, outliers clipped into the edge bins), so extreme values up to 0.5% of either side no longer move the score; an empty side returns `None` (as in `summarise_signal`), two equal constants score 1.0, and a float64-overflowing span no longer crashes.** Original finding: the histogram-overlap bin grid comes from the pair's own min/max. One extreme value
   stretches the grid and collapses both samples into one bin. Measured (5,000-sample normals, seed 0):
   N(0,1) vs N(1,1) = 0.610; the same pair plus a single value of 1,000 = 1.000. Two identical
   constants score 0.0 (degenerate range), and an empty side is 0.0 here but `None` in
@@ -608,7 +613,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   ignores unavailable adapters. Measured: `run_validation(..., datasets=("ved",))` with no Kaggle
   credentials and an empty cache → `passed=True`, `ved` `available=False`. The report summary says
   "all checks passed". Fix: a distinct outcome (or exit code) when a requested dataset did not run.
-- **R4-T10-d — validation tests that cannot fail.** The signal loop in
+- **R4-T10-d — ✅ Fixed 2026-11-23: the report test asserts every Tier-1 signal has a distribution-table row, and the golden test asserts its check set equals every registered signal × the 4 pinned stats (44 checks today; a signal removed from the registry is caught by the pins, not this test). (`_FLEET_DERIVED` no longer exists; dropping signals from the golden run was already caught by the v0.3.0 pins.)** Original finding: validation tests that cannot fail. The signal loop in
   `test_report_is_self_contained_markdown` asserts nothing (its comment describes an assertion that
   was never written); `test_golden_drift_guard_passes` only asserts the pass; adding three CAN signals
   to `_FLEET_DERIVED` drops 3 golden checks and leaves `tests/test_validation.py` at 17 passed.
@@ -704,7 +709,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   golden result is `lru_cache`d and regenerated independently, so NULLs only in the validated readings
   drop in_spec alone. Fix: a signal that should exist for the era and has no values is a failure, and an
   adapter with 0 checks is not a pass.
-- **R4-V2-c — the `ved` comparison uses unmasked generated data.** `in_spec` excludes injected-defect
+- **R4-V2-c — ✅ Fixed 2026-11-23: `_check_ved` applies the same `is_outlier` clean-row mask as `in_spec` before comparing; a test injects 1e6 rpm into flagged rows and asserts the comparison's n and max come from clean rows only.** Original finding: the `ved` comparison uses unmasked generated data. `in_spec` excludes injected-defect
   rows; the `ved` path does not. Measured (default config, loader stubbed): 17,366,400 generated rows
   reach the comparison, 671,506 of them `is_outlier`; `engine_speed_rpm` max 12,048.8 vs spec max
   8,031.875, 34,724 values above it. Combined with R4-T10-b, these values stretch the overlap grid. Fix:
@@ -729,7 +734,7 @@ repo session after the R4 block closes. Measured against the full suite (baselin
   `--season`, ignoring `--emit-raw-frames`, validate dropping `--dataset`. `tests/test_cli.py` run alone
   (7 passed) kills none of six CLI mutations (those three, validate always 0, validate or generate
   ignoring `--seed`); the seed mutations are caught only by tests in other files.
-- **R4-V2-h — comparison and report rendering are unpinned.** Each alone leaves the three files at 31
+- **R4-V2-h — ✅ Fixed 2026-11-23: tests now fail on `compare_distributions` ignoring the reference, a p50/p95 swap, a report without distribution tables, and an overlap column that never shows the score; the 1e6 pair now scores < 0.01.** Original finding: comparison and report rendering are unpinned. Each alone leaves the three files at 31
   passed: `compare_distributions` ignoring the reference sample; `summarise_signal` p50 and p95 swapped;
   the report rendering no distribution tables. Extends R4-T10-b: `histogram_overlap(zeros(1000),
   normal(1500, 300, 1000) + [1e6])` = 0.9990 (1000/1001); without the extreme value, 0.0.

@@ -526,7 +526,9 @@ def _check_ved(
             ),
         )
 
-    cols = _signal_columns(readings)
+    # Same clean-row mask as in_spec: injected-defect rows are not readings (R4-V2-c).
+    clean_rows = _clean_row_mask(readings)
+    cols = {name: arr[clean_rows] for name, arr in _signal_columns(readings).items()}
     comparisons: list[SignalComparison] = []
     checks: list[CheckResult] = []
     for name, ved_col in _VED_COLUMN_MAP.items():

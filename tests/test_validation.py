@@ -63,8 +63,92 @@ def test_histogram_overlap_disjoint_is_zero() -> None:
     assert histogram_overlap(a, b) == 0.0
 
 
-def test_histogram_overlap_empty_is_zero() -> None:
-    assert histogram_overlap(np.array([]), np.array([1.0, 2.0])) == 0.0
+def test_histogram_overlap_empty_side_cannot_compare() -> None:
+    # R4-T10-b: "cannot compare" is None, the same as in summarise_signal (was 0.0).
+    assert histogram_overlap(np.array([]), np.array([1.0, 2.0])) is None
+    assert histogram_overlap(np.array([1.0, 2.0]), np.array([np.nan])) is None
+
+
+def test_histogram_overlap_identical_constants_is_one() -> None:
+    # R4-T10-b: two identical constants used to score 0.0 (degenerate range).
+    assert histogram_overlap(np.full(100, 3.0), np.full(50, 3.0)) == pytest.approx(1.0)
+    assert histogram_overlap(np.full(100, 3.0), np.full(50, 4.0)) == 0.0
+
+
+def test_histogram_overlap_single_outlier_does_not_collapse_the_grid() -> None:
+    # R4-T10-b measurement: N(0,1) vs N(1,1) = 0.610; adding one value of 1,000 used
+    # to stretch the grid into one bin and score 1.000.
+    rng = np.random.default_rng(0)
+    a = rng.normal(0.0, 1.0, 5000)
+    b = rng.normal(1.0, 1.0, 5000)
+    base = histogram_overlap(a, b)
+    assert base == pytest.approx(0.61, abs=0.05)
+    for extreme in (1e3, -1e3, 1e9):
+        assert histogram_overlap(np.append(a, extreme), b) == pytest.approx(base, abs=0.01)
+        assert histogram_overlap(a, np.append(b, extreme)) == pytest.approx(base, abs=0.01)
+
+
+@pytest.mark.parametrize(("n", "k"), [(1000, 5), (200, 1), (10000, 50)])
+def test_histogram_overlap_tolerates_outliers_up_to_half_a_percent(n, k) -> None:
+    # Exactly 0.5% extreme values on either side, at either end, must not stretch the
+    # grid (an interpolated percentile did: 0.011 -> 0.995 at 5/1000).
+    rng = np.random.default_rng(0)
+    a = rng.normal(0.0, 1.0, n)
+    b = rng.normal(5.0, 1.0, n)
+    base = histogram_overlap(a, b)
+    assert base < 0.05
+    for extreme in (1e9, -1e9, 1e12):
+        assert histogram_overlap(a, np.r_[b[: n - k], np.full(k, extreme)]) < base + 0.01
+        assert histogram_overlap(np.r_[a[: n - k], np.full(k, extreme)], b) < base + 0.01
+
+
+def test_histogram_overlap_huge_finite_values_do_not_crash() -> None:
+    # hi - lo overflowed to inf and gave NaN bin edges (ValueError).
+    assert histogram_overlap(np.full(10, -1e308), np.full(10, 1e308)) == 0.0
+    x = np.linspace(-1.0, 1.0, 100) * 1e308
+    assert histogram_overlap(x, x) == pytest.approx(1.0)
+    # Shared 10% cluster at -1e308, the rest disjoint: the data must be rescaled too.
+    g = np.r_[np.full(10, -1e308), np.full(90, 0.15e308)]
+    r = np.r_[np.full(10, -1e308), np.full(90, 0.85e308)]
+    assert histogram_overlap(g, r) == pytest.approx(0.1)
+
+
+def test_summarise_overlap_is_none_when_the_reference_has_no_values() -> None:
+    cmp = summarise_signal("x", "u", np.arange(10, dtype=float), np.full(5, np.nan))
+    assert cmp.overlap is None and cmp.ref_n == 0
+
+
+def test_report_table_shows_the_overlap_score() -> None:
+    from validation.compare import SignalComparison
+    from validation.report import _comparison_table
+
+    row = SignalComparison("x", "u", 3, 0.0, 2.0, 1.0, 0.8, 0.1, 1.0, 1.9, overlap=0.5, ref_n=3)
+    assert _comparison_table([row])[-1].endswith("| 0.500 |")
+
+
+def test_histogram_overlap_disjoint_with_an_outlier_stays_near_zero() -> None:
+    # R4-V2-h measurement: this pair scored 0.9990 (1000/1001); without 1e6, 0.0.
+    rng = np.random.default_rng(0)
+    ref = np.append(rng.normal(1500.0, 300.0, 1000), 1e6)
+    assert histogram_overlap(np.zeros(1000), ref) < 0.01
+
+
+def test_summarise_percentiles_are_in_order() -> None:
+    # R4-V2-h: a p50/p95 swap left the suite green.
+    cmp = summarise_signal("x", "u", np.arange(101, dtype=float))
+    assert (cmp.gen_p05, cmp.gen_p50, cmp.gen_p95) == pytest.approx((5.0, 50.0, 95.0))
+    assert (cmp.gen_min, cmp.gen_max, cmp.n) == (0.0, 100.0, 101)
+
+
+def test_compare_distributions_uses_the_reference_sample() -> None:
+    # R4-V2-h: compare_distributions ignoring ref_columns left the suite green.
+    x = np.linspace(0.0, 10.0, 500)
+    out = compare_distributions(
+        {"a": x, "b": x}, {"a": x, "b": x + 100.0}, {"a": "u", "b": "u"}
+    )
+    by = {c.signal: c for c in out}
+    assert by["a"].ref_n == 500 and by["a"].overlap == pytest.approx(1.0)
+    assert by["b"].overlap == 0.0
 
 
 def test_summarise_drops_nulls() -> None:
@@ -122,6 +206,13 @@ def test_golden_drift_guard_passes() -> None:
     golden = next(r for r in run.results if r.adapter == "golden")
     assert golden.available and golden.checks
     assert golden.passed, [c for c in golden.checks if not c.passed]
+    # R4-T10-d: dropping signals from the golden run must not stay green — every
+    # Tier-1 signal carries all four pinned stats.
+    from validation.reference import GOLDEN_STATS
+
+    assert sorted(c.name for c in golden.checks) == sorted(
+        f"{name} golden {stat}" for name in signal_names() for stat in GOLDEN_STATS
+    )
 
 
 def test_validation_run_passes_offline() -> None:
@@ -210,10 +301,12 @@ def test_report_is_self_contained_markdown() -> None:
     assert "Provenance" in md
     assert "Not real telemetry" in md
     assert "CC-BY 4.0" in md
+    # R4-T10-d / R4-V2-h: this loop used to assert nothing, and a report without
+    # distribution tables stayed green. Every signal gets a row in a table.
+    assert "**Distributions**" in md
+    assert "| Signal | Unit | n | min | p05 | p50 | mean | p95 | max | overlap |" in md
     for name in signal_names():
-        if name in {"runtime_hours", "equipment_age_days"}:
-            continue
-        # engine-core signals should appear in at least one distribution table
+        assert f"| `{name}` |" in md, name
     assert "`in_spec`" in md and "`golden`" in md
 
 
@@ -494,6 +587,30 @@ def test_ved_zero_overlap_is_a_failing_check(monkeypatch) -> None:
     monkeypatch.setattr(ref, "_load_ved_frame", lambda cache_dir, handle=None: far)
     result = ref._check_ved(simulate(small_config()).readings, ref._units_map())
     assert result.checks and not result.passed
+
+
+def test_ved_compares_only_clean_rows(monkeypatch) -> None:
+    # R4-V2-c: the ved path compared injected-defect rows that in_spec excludes.
+    import pandas as pd
+    import validation.reference as ref
+
+    from can_telemetry_forge.sim import simulate
+
+    readings = simulate(small_config()).readings.copy()
+    clean = ~readings["is_outlier"].to_numpy().astype(bool)
+    readings.loc[readings.index[:3], "engine_speed_rpm"] = 1e6
+    readings.loc[readings.index[:3], "is_outlier"] = True
+    clean[:3] = False
+    ved = pd.DataFrame(
+        {"Engine_RPM_RPM": np.linspace(700, 2200, 500), "Absolute_Load_pct": np.linspace(5, 95, 500)}
+    )
+    monkeypatch.setattr(ref, "_load_ved_frame", lambda cache_dir, handle=None: ved)
+    result = ref._check_ved(readings, ref._units_map())
+    rpm = next(c for c in result.comparisons if c.signal == "engine_speed_rpm")
+    want = readings["engine_speed_rpm"].to_numpy(dtype=float)[clean]
+    want = want[np.isfinite(want)]
+    assert rpm.n == want.size
+    assert rpm.gen_max == want.max() < 1e6
 
 
 def test_report_overall_glyph_is_fail_when_a_reference_did_not_run(monkeypatch) -> None:
